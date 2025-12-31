@@ -2,7 +2,7 @@ use std::collections::{HashMap, BinaryHeap};
 use std::cmp::Ordering;
 use super::term::Term;
 use super::memory::{Concept, Hypervector};
-use super::rules::{InferenceRule, TruthFunction, load_default_rules};
+use super::rules::{InferenceRule, TruthFunction};
 use super::rule_loader::load_rules;
 use super::glove::load_embeddings;
 use super::unify::{unify_with_bindings, Bindings};
@@ -46,9 +46,13 @@ pub struct NarsSystem {
 
 impl NarsSystem {
     pub fn new(learning_rate: f32, similarity_threshold: f32) -> Self {
+        // Try to load rules from assets, fallback to default if not found (or panic?)
+        // User instruction: "Update NarsSystem ... to call load_rules"
+        let rules = load_rules("assets/rules.lisp");
+        
         Self {
             memory: HashMap::new(),
-            rules: load_default_rules(),
+            rules,
             buffer: BinaryHeap::new(),
             learning_rate,
             similarity_threshold,

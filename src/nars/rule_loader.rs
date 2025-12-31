@@ -1,14 +1,228 @@
 use std::fs;
-use super::term::{Term, Operator, VarType};
+use nom::{
+    branch::alt,
+    bytes::complete::{take_while, take_while1},
+    character::complete::{char, multispace0},
+    combinator::{map, value},
+    multi::many0,
+    sequence::{delimited, pair, preceded},
+    IResult,
+    Parser,
+};
 use super::rules::{InferenceRule, TruthFunction};
-use super::truth::{self, TruthValue};
+use super::term::{Term, Operator, VarType};
+use super::truth;
 
-#[derive(Debug, Clone)]
-enum SExpr {
+#[derive(Debug, Clone, PartialEq)]
+enum Sexp {
     Atom(String),
-    List(Vec<SExpr>),
+    List(Vec<Sexp>),
 }
 
+fn is_symbol_char(c: char) -> bool {
+    !c.is_whitespace() && c != '(' && c != ')' && c != ';'
+}
+
+fn parse_atom(input: &str) -> IResult<&str, Sexp> {
+    map(take_while1(is_symbol_char), |s: &str| Sexp::Atom(s.to_string())).parse(input)
+}
+
+fn parse_comment(input: &str) -> IResult<&str, ()> {
+    value(
+        (),
+        pair(char(';'), take_while(|c| c != '\n' && c != '\r')),
+    ).parse(input)
+}
+
+fn parse_sexp(input: &str) -> IResult<&str, Sexp> {
+    let (input, _) = multispace0(input)?;
+    let (input, _) = many0((parse_comment, multispace0)).parse(input)?;
+    
+    alt((
+        parse_atom,
+        map(
+            delimited(
+                char('('),
+                many0(parse_sexp),
+                preceded(multispace0, char(')')),
+            ),
+            Sexp::List,
+        ),
+    )).parse(input)
+}
+
+fn parse_file(input: &str) -> IResult<&str, Vec<Sexp>> {
+    many0(parse_sexp).parse(input)
+}
+
+fn parse_term(sexp: &Sexp) -> Option<Term> {
+    match sexp {
+        Sexp::Atom(s) => {
+            if s.starts_with(':') {
+                Some(Term::var_from_str(VarType::Independent, &s[1..]))
+            } else if s.starts_with("$") {
+                Some(Term::var_from_str(VarType::Independent, &s[1..]))
+            } else if s.starts_with("#") {
+                Some(Term::var_from_str(VarType::Dependent, &s[1..]))
+            } else if s.starts_with("?") {
+                Some(Term::var_from_str(VarType::Query, &s[1..]))
+            } else {
+                Some(Term::atom_from_str(s))
+            }
+        }
+        Sexp::List(list) => {
+            if list.is_empty() {
+                return None;
+            }
+            // Check for infix notation like (:S --> :P)
+            if list.len() == 3 {
+                if let Sexp::Atom(op_str) = &list[1] {
+                    let op = match op_str.as_str() {
+                        "-->" => Some(Operator::Inheritance),
+                        "==>" => Some(Operator::Implication),
+                        "<->" => Some(Operator::Similarity),
+                        "<=>" => Some(Operator::Equivalence),
+                        _ => None,
+                    };
+                    
+                    if let Some(operator) = op {
+                        let subject = parse_term(&list[0])?;
+                        let predicate = parse_term(&list[2])?;
+                        return Some(Term::Compound(operator, vec![subject, predicate]));
+                    }
+                }
+            }
+
+            // Prefix notation or other compounds
+            if let Sexp::Atom(op_str) = &list[0] {
+                let op = match op_str.as_str() {
+                    "&" => Operator::IntIntersection,
+                    "|" => Operator::ExtIntersection,
+                    "-" => Operator::Difference,
+                    "~" => Operator::Difference,
+                    "--" => Operator::Negation,
+                    "&&" => Operator::Conjunction,
+                    "||" => Operator::Disjunction,
+                    "*" => Operator::Product,
+                    "/" => Operator::ExtImage,
+                    "\\" => Operator::IntImage,
+                    "{}" => Operator::ExtSet,
+                    "[]" => Operator::IntSet,
+                    _ => Operator::Other(op_str.clone()),
+                };
+                
+                let mut args = Vec::new();
+                for item in &list[1..] {
+                    args.push(parse_term(item)?);
+                }
+                return Some(Term::Compound(op, args));
+            }
+            
+            None
+        }
+    }
+}
+
+fn get_truth_fn(name: &str) -> Option<TruthFunction> {
+    match name {
+        ":t/deduction" => Some(TruthFunction::Double(truth::deduction)),
+        ":t/abduction" => Some(TruthFunction::Double(truth::abduction)),
+        ":t/induction" => Some(TruthFunction::Double(truth::induction)),
+        ":t/exemplification" => Some(TruthFunction::Double(truth::exemplification)),
+        ":t/comparison" => Some(TruthFunction::Double(truth::comparison)),
+        ":t/analogy" => Some(TruthFunction::Double(truth::analogy)),
+        ":t/resemblance" => Some(TruthFunction::Double(truth::resemblance)),
+        ":t/intersection" => Some(TruthFunction::Double(truth::intersection)),
+        ":t/union" => Some(TruthFunction::Double(truth::union)),
+        ":t/difference" => Some(TruthFunction::Double(truth::difference)),
+        ":t/conversion" => Some(TruthFunction::Single(truth::conversion)),
+        ":t/contraposition" => Some(TruthFunction::Single(truth::contraposition)),
+        ":t/negation" => Some(TruthFunction::Single(nal_negation)),
+        _ => None,
+    }
+}
+
+fn nal_negation(v: truth::TruthValue) -> truth::TruthValue {
+    truth::TruthValue::new(truth::nal_not(v.frequency), v.confidence)
+}
+
+pub fn load_rules(path: &str) -> Vec<InferenceRule> {
+    let content = fs::read_to_string(path).expect("Failed to read rules file");
+    let (_, sexps) = parse_file(&content).expect("Failed to parse rules file");
+    
+    let mut rules = Vec::new();
+
+    for top_level in sexps {
+        if let Sexp::List(items) = top_level {
+            if items.is_empty() { continue; }
+            
+            // Iterate over the rules inside the definition
+            // The format is (define-mediate-rules *name* rule1 rule2 ...)
+            for rule_sexp in &items[2..] {
+                if let Sexp::List(rule_parts) = rule_sexp {
+                    // Find "!-"
+                    if let Some(split_idx) = rule_parts.iter().position(|x| matches!(x, Sexp::Atom(s) if s == "!-")) {
+                        let premises_sexps = &rule_parts[0..split_idx];
+                        let conclusions_sexps = &rule_parts[split_idx+1]; // This is a list of conclusions
+                        
+                        // Parse premises
+                        let mut premises = Vec::new();
+                        for p in premises_sexps {
+                            if let Some(term) = parse_term(p) {
+                                premises.push(term);
+                            }
+                        }
+                        
+                        // Parse conclusions
+                        if let Sexp::List(conclusions_list) = conclusions_sexps {
+                            for concl_def in conclusions_list {
+                                if let Sexp::List(parts) = concl_def {
+                                    if parts.len() >= 2 {
+                                        let term_sexp = &parts[0];
+                                        let truth_info = &parts[1];
+                                        
+                                        if let Some(term) = parse_term(term_sexp) {
+                                            // Extract truth function
+                                            let mut truth_fn = None;
+                                            if let Sexp::List(tf_parts) = truth_info {
+                                                for tf_part in tf_parts {
+                                                    if let Sexp::Atom(s) = tf_part {
+                                                        if let Some(tf) = get_truth_fn(s) {
+                                                            truth_fn = Some(tf);
+                                                            break;
+                                                        }
+                                                        // Special case for negation which might be named differently
+                                                        if s == ":t/negation" {
+                                                            truth_fn = Some(TruthFunction::Single(nal_negation));
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            if let Some(tf) = truth_fn {
+                                                rules.push(InferenceRule {
+                                                    premises: premises.clone(),
+                                                    conclusion: term,
+                                                    truth_fn: tf,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    rules
+}
+
+
+/*
 fn parse_sexpr(input: &str) -> Vec<SExpr> {
     let mut tokens = tokenize(input);
     let mut exprs = Vec::new();
@@ -222,7 +436,7 @@ pub fn load_rules(path: &str) -> Vec<InferenceRule> {
                                     if let SExpr::List(concl_list) = &rule_parts[idx + 1] {
                                         // ((:S --> :P) (:t/deduction ...))
                                         // Sometimes it's a list of conclusions?
-                                        // The example shows: (((:S --> :P) (:t/deduction ...)))
+                                        // The example shows: (((:S --> :P) (:t/deduction :d/strong)))
                                         // Wait, look at the file:
                                         // ((:M --> :P) (:S --> :M) !- (((:S --> :P) (:t/deduction :d/strong)))
                                         // So the element after !- is a List of (Conclusion, TruthFn) pairs.
@@ -260,3 +474,4 @@ pub fn load_rules(path: &str) -> Vec<InferenceRule> {
 
     rules
 }
+*/
