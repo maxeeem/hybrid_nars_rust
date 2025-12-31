@@ -2,8 +2,9 @@ use anyhow::{Context, Result};
 use hybrid_nars_rust::nars::control::NarsSystem;
 use hybrid_nars_rust::nars::parser::parse_narsese;
 use hybrid_nars_rust::nars::sentence::Sentence;
-use hybrid_nars_rust::nars::term::Term;
+use hybrid_nars_rust::nars::term::{Term, VarType};
 use hybrid_nars_rust::nars::truth::TruthValue;
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -160,7 +161,54 @@ fn check_expectations(outputs: &[Sentence], expectations: &mut Vec<String>) -> R
 }
 
 fn terms_match(t1: &Term, t2: &Term) -> bool {
-    t1 == t2
+    normalize_term(t1) == normalize_term(t2)
+}
+
+fn normalize_term(term: &Term) -> Term {
+    let mut mapping = HashMap::new();
+    let mut counters = (1, 1, 1); // Indep, Dep, Query
+    normalize_term_recursive(term, &mut mapping, &mut counters)
+}
+
+fn normalize_term_recursive(term: &Term, mapping: &mut HashMap<String, u64>, counters: &mut (usize, usize, usize)) -> Term {
+    match term {
+        Term::Var(vtype, id) => {
+            let key = format!("{:?}:{}", vtype, id);
+            if let Some(new_id) = mapping.get(&key) {
+                Term::Var(*vtype, *new_id)
+            } else {
+                let new_name = match vtype {
+                    VarType::Independent => {
+                        let n = counters.0;
+                        counters.0 += 1;
+                        format!("{}", n)
+                    },
+                    VarType::Dependent => {
+                        let n = counters.1;
+                        counters.1 += 1;
+                        format!("{}", n)
+                    },
+                    VarType::Query => {
+                        let n = counters.2;
+                        counters.2 += 1;
+                        format!("{}", n)
+                    },
+                };
+                let new_term = Term::var_from_str(*vtype, &new_name);
+                if let Term::Var(_, new_id) = new_term {
+                    mapping.insert(key, new_id);
+                    new_term
+                } else {
+                    unreachable!()
+                }
+            }
+        },
+        Term::Compound(op, args) => {
+            let new_args = args.iter().map(|arg| normalize_term_recursive(arg, mapping, counters)).collect();
+            Term::Compound(op.clone(), new_args)
+        },
+        _ => term.clone(),
+    }
 }
 
 fn truth_matches(t1: TruthValue, t2: TruthValue) -> bool {

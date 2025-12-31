@@ -1,6 +1,6 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while1},
+    bytes::complete::{tag, take_while, take_while1},
     character::complete::{char, digit1, multispace0, one_of},
     combinator::{map, map_res, opt, recognize, value, all_consuming},
     multi::separated_list0,
@@ -55,7 +55,7 @@ fn parse_atom(input: &str) -> IResult<&str, Term> {
 
 fn parse_variable(input: &str) -> IResult<&str, Term> {
     let (input, prefix) = one_of("$#?")(input)?;
-    let (input, name) = take_while1(is_alphanumeric_or_underscore)(input)?;
+    let (input, name) = take_while(is_alphanumeric_or_underscore)(input)?;
     
     let var_type = match prefix {
         '$' => VarType::Independent,
@@ -217,4 +217,32 @@ pub fn parse_narsese(input: &str) -> Result<Sentence, String> {
     };
 
     Ok(Sentence::new(term, punctuation, truth, stamp))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_variables() {
+        // Standard vars
+        assert!(parse_term("$X").is_ok());
+        assert!(parse_term("#Y").is_ok());
+        assert!(parse_term("?Z").is_ok());
+
+        // Anonymous vars
+        assert!(parse_term("#").is_ok());
+        assert!(parse_term("?").is_ok());
+
+        // Compounds with vars
+        assert!(parse_term("(*, $X, #Y)").is_ok());
+
+        // NAL-6 Implication with vars
+        assert!(parse_narsese("<<$x --> S> ==> <$x --> P>>.").is_ok());
+    }
+
+    #[test]
+    fn test_term_indices() {
+        assert!(parse_term("key_101").is_ok());
+    }
 }

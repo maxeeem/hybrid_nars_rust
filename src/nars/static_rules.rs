@@ -129,6 +129,7 @@ fn get_truth_fn(name: &str) -> TruthFunction {
         "induction" => TruthFunction::Double(truth::induction),
         "exemplification" => TruthFunction::Double(truth::exemplification),
         "intersection" => TruthFunction::Double(truth::intersection),
+        "comparison" => TruthFunction::Double(truth::comparison),
         "analogy" => TruthFunction::Double(truth::analogy),
         "resemblance" => TruthFunction::Double(truth::resemblance),
         "conversion" => TruthFunction::Single(truth::conversion),
