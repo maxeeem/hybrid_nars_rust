@@ -1,0 +1,5 @@
+'Revision example
+<bird --> swimmer>.
+<bird --> swimmer>. %0.10;0.60%
+10
+''outputMustContain('<bird --> swimmer>. %0.87;0.91%')

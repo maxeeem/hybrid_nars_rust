@@ -1,0 +1,17 @@
+' --- Test 1: Immediate Inference (Conversion) ---
+'Statement: Bird is a swimmer.
+<bird --> swimmer>.
+10
+'Expectation: Swimmer is a type of bird (Weak confidence due to conversion).
+''outputMustContain('<swimmer --> bird>. %1.00;0.47%')
+
+' --- Test 2: Implication Logic (Higher Order) ---
+'Statement: If it rains, it is wet.
+<rain ==> wet>.
+'Statement: It rains.
+<rain --> event>.
+'Note: We need a mechanism to treat <rain --> event> as 'rain' being true for implication.
+'For this basic test, we will just test Contraposition on the rule itself.
+10
+'Expectation: If not wet, then not raining.
+''outputMustContain('<(-- wet) ==> (-- rain)>. %0.00;0.45%')
