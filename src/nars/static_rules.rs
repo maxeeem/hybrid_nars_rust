@@ -168,30 +168,30 @@ pub fn get_all_rules() -> Vec<InferenceRule> {
     rules.push(rule!("(:S ==> :P)"              !- "((-- :P) ==> (-- :S))"   "contraposition"));
 
     // --- SYLLOGISMS (NAL-1) ---
-    rules.push(rule!("(:M --> :P) (:S --> :M)"  !- "(:S --> :P)"             "deduction"));
-    rules.push(rule!("(:P --> :M) (:S --> :M)"  !- "(:S --> :P)"             "abduction"));
-    rules.push(rule!("(:M --> :P) (:M --> :S)"  !- "(:S --> :P)"             "induction"));
-    rules.push(rule!("(:P --> :M) (:M --> :S)"  !- "(:S --> :P)"             "exemplification"));
+    rules.push(rule!("(:M --> :P)" "(:S --> :M)"  !- "(:S --> :P)"             "deduction"));
+    rules.push(rule!("(:P --> :M)" "(:S --> :M)"  !- "(:S --> :P)"             "abduction"));
+    rules.push(rule!("(:M --> :P)" "(:M --> :S)"  !- "(:S --> :P)"             "induction"));
+    rules.push(rule!("(:P --> :M)" "(:M --> :S)"  !- "(:S --> :P)"             "exemplification"));
 
     // --- SYLLOGISMS (NAL-2) ---
-    rules.push(rule!("(:S --> :P) (:P --> :S)"  !- "(:P <-> :S)"             "intersection"));
-    rules.push(rule!("(:M --> :P) (:S <-> :M)"  !- "(:S --> :P)"             "analogy"));
-    rules.push(rule!("(:P --> :M) (:S <-> :M)"  !- "(:P --> :S)"             "analogy"));
-    rules.push(rule!("(:M <-> :P) (:S <-> :M)"  !- "(:P <-> :S)"             "resemblance"));
+    rules.push(rule!("(:S --> :P)" "(:P --> :S)"  !- "(:P <-> :S)"             "intersection"));
+    rules.push(rule!("(:M --> :P)" "(:S <-> :M)"  !- "(:S --> :P)"             "analogy"));
+    rules.push(rule!("(:P --> :M)" "(:S <-> :M)"  !- "(:P --> :S)"             "analogy"));
+    rules.push(rule!("(:M <-> :P)" "(:S <-> :M)"  !- "(:P <-> :S)"             "resemblance"));
 
     // --- HIGHER ORDER (NAL-5) ---
-    rules.push(rule!("(:M ==> :P) (:S ==> :M)"  !- "(:S ==> :P)"             "deduction"));
-    rules.push(rule!("(:P ==> :M) (:S ==> :M)"  !- "(:S ==> :P)"             "abduction"));
-    rules.push(rule!("(:M ==> :P) (:M ==> :S)"  !- "(:S ==> :P)"             "induction"));
-    rules.push(rule!("(:S ==> :P) (:P ==> :S)"  !- "(:S <=> :P)"             "intersection"));
-    rules.push(rule!("(:M ==> :P) (:S <=> :M)"  !- "(:S ==> :P)"             "analogy"));
-    rules.push(rule!("(:M <=> :P) (:S <=> :M)"  !- "(:S <=> :P)"             "resemblance"));
+    rules.push(rule!("(:M ==> :P)" "(:S ==> :M)"  !- "(:S ==> :P)"             "deduction"));
+    rules.push(rule!("(:P ==> :M)" "(:S ==> :M)"  !- "(:S ==> :P)"             "abduction"));
+    rules.push(rule!("(:M ==> :P)" "(:M ==> :S)"  !- "(:S ==> :P)"             "induction"));
+    rules.push(rule!("(:S ==> :P)" "(:P ==> :S)"  !- "(:S <=> :P)"             "intersection"));
+    rules.push(rule!("(:M ==> :P)" "(:S <=> :M)"  !- "(:S ==> :P)"             "analogy"));
+    rules.push(rule!("(:M <=> :P)" "(:S <=> :M)"  !- "(:S <=> :P)"             "resemblance"));
 
     // --- VARIABLES (NAL-6) ---
-    rules.push(rule!("(:S --> :M) (:P --> :M)"  !- "((:P --> $X) ==> (:S --> $X))" "abduction"));
-    rules.push(rule!("(:S --> :M) (:P --> :M)"  !- "((:S --> $X) ==> (:P --> $X))" "induction"));
-    rules.push(rule!("(:M --> :S) (:M --> :P)"  !- "(($X --> :S) ==> ($X --> :P))" "induction"));
-    rules.push(rule!("(:M --> :S) (:M --> :P)"  !- "(($X --> :P) ==> ($X --> :S))" "abduction"));
+    rules.push(rule!("(:S --> :M)" "(:P --> :M)"  !- "((:P --> $X) ==> (:S --> $X))" "abduction"));
+    rules.push(rule!("(:S --> :M)" "(:P --> :M)"  !- "((:S --> $X) ==> (:P --> $X))" "induction"));
+    rules.push(rule!("(:M --> :S)" "(:M --> :P)"  !- "(($X --> :S) ==> ($X --> :P))" "induction"));
+    rules.push(rule!("(:M --> :S)" "(:M --> :P)"  !- "(($X --> :P) ==> ($X --> :S))" "abduction"));
 
     rules
 }

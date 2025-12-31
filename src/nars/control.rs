@@ -95,6 +95,9 @@ impl NarsSystem {
         if let Some(task) = self.buffer.pop() {
             let term_a = task.concept_term;
             
+            // println!("Cycle: Processing task {:?}", term_a);
+            // println!("Memory size: {}", self.memory.len());
+
             // We need to clone concept_a to avoid borrowing issues with self.memory
             let concept_a = if let Some(c) = self.memory.get(&term_a) {
                 c.clone()
@@ -106,65 +109,88 @@ impl NarsSystem {
             // Before finding a match, try immediate inference on the selected task
             self.reason_single(&concept_a);
 
-            let mut best_match_term: Option<Term> = None;
-            let mut max_sim = -1.0;
-
+            // Iterate through all concepts in memory to find matches
+            let mut partners = Vec::new();
+            
             for (term_b, concept_b) in &self.memory {
                 if *term_b == term_a {
                     continue;
                 }
                 let sim = concept_a.vector.similarity(&concept_b.vector);
-                if sim > max_sim && sim > self.similarity_threshold {
-                    max_sim = sim;
-                    best_match_term = Some(term_b.clone());
+                if sim > self.similarity_threshold {
+                    partners.push(term_b.clone());
                 }
             }
+            
+            // println!("Partners found: {}", partners.len());
 
-            if let Some(term_b) = best_match_term {
-                let concept_b = self.memory.get(&term_b).unwrap().clone();
-                
-                // Step 3: Reasoning
-                self.reason(&concept_a, &concept_b);
-                self.reason(&concept_b, &concept_a);
+            for term_b in partners {
+                if let Some(concept_b) = self.memory.get(&term_b) {
+                    let concept_b = concept_b.clone();
+                    
+                    // println!("Calling reason for A and B");
+                    // Step 3: Reasoning
+                    self.reason(&concept_a, &concept_b);
+                    self.reason(&concept_b, &concept_a);
 
-                // Step 5: Learning (Hebbian)
-                // Update vectors in memory
-                if let Some(c_a) = self.memory.get_mut(&term_a) {
-                    c_a.vector.update(&concept_b.vector, self.learning_rate);
-                }
-                if let Some(c_b) = self.memory.get_mut(&term_b) {
-                    c_b.vector.update(&concept_a.vector, self.learning_rate);
+                    // Step 5: Learning (Hebbian)
+                    // Update vectors in memory
+                    // Note: We need to re-borrow mutably, so we can't hold concept_b ref
+                    // But we cloned concept_b, so it's fine.
+                    // However, we need to get mutable ref to concept_a and concept_b in memory.
+                    
+                    if let Some(c_a) = self.memory.get_mut(&term_a) {
+                        c_a.vector.update(&concept_b.vector, self.learning_rate);
+                    }
+                    if let Some(c_b) = self.memory.get_mut(&term_b) {
+                        c_b.vector.update(&concept_a.vector, self.learning_rate);
+                    }
                 }
             }
         }
     }
 
     fn reason(&mut self, concept_a: &Concept, concept_b: &Concept) {
+        // println!("Inside reason function");
         // Check for evidence overlap
-        if has_evidence_overlap(&concept_a.stamp, &concept_b.stamp) {
+        if concept_a.stamp.overlaps(&concept_b.stamp) {
+            // println!("Overlap detected!");
             return;
         }
 
         // Collect applicable rules and bindings first to avoid borrowing self.rules while mutating self
         let mut inferences_to_execute = Vec::new();
 
+        // println!("Rules count: {}", self.rules.len());
+
         for (rule_idx, rule) in self.rules.iter().enumerate() {
             // Try to unify premises with (A, B)
             // Rule premises: [P1, P2]
             // We try P1 <-> A, P2 <-> B
             
+            // println!("Rule {} premises: {}", rule_idx, rule.premises.len());
+
             if rule.premises.len() != 2 {
                 continue; 
             }
 
+            // Debug unification
+            // println!("Trying rule {} P1 with A: {:?}", rule_idx, concept_a.term);
+
             // Try Unification
             // 1. Unify P1 with A
             if let Some(bindings_1) = unify_with_bindings(&rule.premises[0], &concept_a.term, HashMap::new()) {
+                // println!("  P1 matched! Bindings: {:?}", bindings_1);
                 // 2. Unify P2 with B, using bindings from 1
                 if let Some(final_bindings) = unify_with_bindings(&rule.premises[1], &concept_b.term, bindings_1) {
+                    // println!("  P2 matched!");
                     // Success!
                     inferences_to_execute.push((rule_idx, final_bindings));
+                } else {
+                    // println!("  P2 failed to match B: {:?}", concept_b.term);
                 }
+            } else {
+                // println!("  P1 failed to match A: {:?}", concept_a.term);
             }
         }
 
@@ -202,6 +228,11 @@ impl NarsSystem {
         let new_truth = (truth_fn)(concept.truth);
         let new_stamp = concept.stamp.clone(); 
         
+        // Debug Output
+        // println!("Single Inference:");
+        // println!("  Premise: {:?} Truth: {:?}", concept.term, concept.truth);
+        // println!("  Derived: {:?} Truth: {:?}", conclusion_term, new_truth);
+
         // For immediate inference, we can reuse the vector or project it. 
         // Reusing it implies semantic similarity which is often true for conversion/contraposition.
         let new_vector = concept.vector.clone();
@@ -221,7 +252,13 @@ impl NarsSystem {
         let new_truth = (truth_fn)(concept_a.truth, concept_b.truth);
         
         // Merge Stamps
-        let new_stamp = merge_stamps(&concept_a.stamp, &concept_b.stamp);
+        let new_stamp = concept_a.stamp.merge(&concept_b.stamp);
+
+        // Debug Output
+        // println!("Inference:");
+        // println!("  Premise 1: {:?} Truth: {:?}", concept_a.term, concept_a.truth);
+        // println!("  Premise 2: {:?} Truth: {:?}", concept_b.term, concept_b.truth);
+        // println!("  Derived: {:?} Truth: {:?}", conclusion_term, new_truth);
 
         // Create new Concept
         let new_vector = Hypervector::bundle(&[concept_a.vector, concept_b.vector]);
@@ -239,31 +276,6 @@ impl NarsSystem {
 
     pub fn load_embeddings_from_file(&mut self, path: &str) -> std::io::Result<()> {
         load_embeddings(path, self)
-    }
-}
-
-fn has_evidence_overlap(stamp1: &Stamp, stamp2: &Stamp) -> bool {
-    for e1 in &stamp1.evidence {
-        if stamp2.evidence.contains(e1) {
-            return true;
-        }
-    }
-    false
-}
-
-fn merge_stamps(stamp1: &Stamp, stamp2: &Stamp) -> Stamp {
-    let mut new_evidence = stamp1.evidence.clone();
-    for e in &stamp2.evidence {
-        if !new_evidence.contains(e) {
-            new_evidence.push(*e);
-        }
-    }
-    // Sort for consistency if needed, but not strictly required for logic
-    new_evidence.sort(); 
-    
-    Stamp {
-        creation_time: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-        evidence: new_evidence,
     }
 }
 

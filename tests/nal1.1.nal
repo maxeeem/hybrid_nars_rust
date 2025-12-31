@@ -1,0 +1,5 @@
+' deduction
+<bird --> animal>.
+<robin --> bird>.
+100
+<robin --> animal>?

@@ -58,7 +58,8 @@ fn run_test_file<P: AsRef<Path>>(path: P) -> Result<()> {
     let file = File::open(path).context("Failed to open test file")?;
     let reader = BufReader::new(file);
     
-    let mut system = NarsSystem::new(0.1, 0.5);
+    // Use a lower similarity threshold to ensure reasoning happens even with random vectors
+    let mut system = NarsSystem::new(0.1, -1.0);
     
     // Skip loading embeddings for unit tests to improve performance
     // let glove_path = "assets/glove.txt";

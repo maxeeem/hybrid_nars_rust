@@ -1,6 +1,15 @@
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use serde::{Serialize, Deserialize};
+
+// Deterministic hash function (FNV-1a)
+fn deterministic_hash(s: &str) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in s.bytes() {
+        hash = hash ^ (byte as u64);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VarType {
@@ -51,14 +60,10 @@ pub enum Term {
 
 impl Term {
     pub fn atom_from_str(s: &str) -> Self {
-        let mut hasher = DefaultHasher::new();
-        s.hash(&mut hasher);
-        Term::Atom(hasher.finish())
+        Term::Atom(deterministic_hash(s))
     }
 
     pub fn var_from_str(type_: VarType, s: &str) -> Self {
-        let mut hasher = DefaultHasher::new();
-        s.hash(&mut hasher);
-        Term::Var(type_, hasher.finish())
+        Term::Var(type_, deterministic_hash(s))
     }
 }
