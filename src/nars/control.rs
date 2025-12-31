@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use super::term::Term;
 use super::memory::{Concept, Hypervector};
 use super::rules::{InferenceRule, TruthFunction};
-use super::rule_loader::load_rules;
+use super::static_rules::get_all_rules;
 use super::glove::load_embeddings;
 use super::unify::{unify_with_bindings, Bindings};
 use super::sentence::{Sentence, Punctuation, Stamp};
@@ -46,9 +46,8 @@ pub struct NarsSystem {
 
 impl NarsSystem {
     pub fn new(learning_rate: f32, similarity_threshold: f32) -> Self {
-        // Try to load rules from assets, fallback to default if not found (or panic?)
-        // User instruction: "Update NarsSystem ... to call load_rules"
-        let rules = load_rules("assets/rules.lisp");
+        // Load rules from static configuration
+        let rules = get_all_rules();
         
         Self {
             memory: HashMap::new(),
@@ -237,15 +236,6 @@ impl NarsSystem {
         self.add_concept(new_concept);
     }
 
-    pub fn load_rules_from_file(&mut self, path: &str) {
-        let new_rules = load_rules(path);
-        if !new_rules.is_empty() {
-            println!("Loaded {} rules from {}", new_rules.len(), path);
-            self.rules = new_rules;
-        } else {
-            println!("No rules loaded from {}, keeping defaults.", path);
-        }
-    }
 
     pub fn load_embeddings_from_file(&mut self, path: &str) -> std::io::Result<()> {
         load_embeddings(path, self)

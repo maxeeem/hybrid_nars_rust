@@ -6,7 +6,7 @@ pub mod memory;
 pub mod rules;
 pub mod control;
 pub mod parser;
-pub mod rule_loader;
+pub mod static_rules;
 pub mod glove;
 mod tests;
 mod tests_integration;

@@ -59,12 +59,6 @@ fn run_test_file<P: AsRef<Path>>(path: P) -> Result<()> {
     
     let mut system = NarsSystem::new(0.1, 0.5);
     
-    // Load rules
-    let rules_path = "assets/rules.lisp";
-    if std::path::Path::new(rules_path).exists() {
-        system.load_rules_from_file(rules_path);
-    }
-
     // Skip loading embeddings for unit tests to improve performance
     // let glove_path = "assets/glove.txt";
     // if std::path::Path::new(glove_path).exists() {
