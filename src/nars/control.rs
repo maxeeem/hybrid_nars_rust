@@ -57,7 +57,7 @@ impl NarsSystem {
     }
 
     pub fn input(&mut self, sentence: Sentence) {
-        let vector = Hypervector::random();
+        let vector = Hypervector::from_term(&sentence.term);
         let concept = Concept::new(sentence.term, vector, sentence.truth, sentence.stamp);
         self.add_concept(concept);
     }

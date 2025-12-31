@@ -1,15 +1,19 @@
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 use super::term::Term;
 use super::truth::TruthValue;
 use super::sentence::Stamp;
+use serde::{Serialize, Deserialize};
+use serde_big_array::BigArray;
 
 const HV_DIM_U64: usize = 157; // 157 * 64 = 10048 bits
 const HV_DIM_BITS: usize = HV_DIM_U64 * 64;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Hypervector {
+    #[serde(with = "BigArray")]
     pub bits: [u64; HV_DIM_U64],
 }
 
@@ -125,9 +129,60 @@ impl Hypervector {
 
         *self = Self::bundle(&inputs);
     }
+
+    pub fn from_term(term: &Term) -> Self {
+        match term {
+            Term::Atom(id) => {
+                let mut rng = StdRng::seed_from_u64(*id);
+                let mut bits = [0; HV_DIM_U64];
+                for i in 0..HV_DIM_U64 {
+                    bits[i] = rng.random();
+                }
+                Self { bits }
+            },
+            Term::Var(_, id) => {
+                 let mut rng = StdRng::seed_from_u64(*id);
+                 let mut bits = [0; HV_DIM_U64];
+                 for i in 0..HV_DIM_U64 {
+                     bits[i] = rng.random();
+                 }
+                 Self { bits }
+            },
+            Term::Compound(op, args) => {
+                let mut inputs = Vec::new();
+                
+                // Operator vector
+                let mut hasher = DefaultHasher::new();
+                op.hash(&mut hasher);
+                let op_hash = hasher.finish();
+                let mut rng = StdRng::seed_from_u64(op_hash);
+                let mut op_bits = [0; HV_DIM_U64];
+                for i in 0..HV_DIM_U64 {
+                    op_bits[i] = rng.random();
+                }
+                inputs.push(Hypervector { bits: op_bits });
+
+                for arg in args {
+                    inputs.push(Self::from_term(arg));
+                }
+                
+                // Ensure odd number of inputs for better bundling properties
+                if inputs.len() % 2 == 0 {
+                    let mut rng = StdRng::seed_from_u64(99999); // Constant seed
+                    let mut bias_bits = [0; HV_DIM_U64];
+                    for i in 0..HV_DIM_U64 {
+                        bias_bits[i] = rng.random();
+                    }
+                    inputs.push(Hypervector { bits: bias_bits });
+                }
+
+                Self::bundle(&inputs)
+            }
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Concept {
     pub term: Term,
     pub vector: Hypervector,

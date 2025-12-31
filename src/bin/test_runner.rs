@@ -41,7 +41,7 @@ fn main() -> Result<()> {
             println!("----------------------------------------");
         }
         
-        println!("Summary: {}/{} tests passed.", total - failures, total);
+        println!("PASSED: {}, FAILED: {}", total - failures, failures);
         if failures > 0 {
             std::process::exit(1);
         }
@@ -65,11 +65,11 @@ fn run_test_file<P: AsRef<Path>>(path: P) -> Result<()> {
         system.load_rules_from_file(rules_path);
     }
 
-    // Load embeddings
-    let glove_path = "assets/glove.txt";
-    if std::path::Path::new(glove_path).exists() {
-        let _ = system.load_embeddings_from_file(glove_path);
-    }
+    // Skip loading embeddings for unit tests to improve performance
+    // let glove_path = "assets/glove.txt";
+    // if std::path::Path::new(glove_path).exists() {
+    //     let _ = system.load_embeddings_from_file(glove_path);
+    // }
 
     let mut active_expectations: Vec<String> = Vec::new();
     let mut accumulated_outputs: Vec<Sentence> = Vec::new();

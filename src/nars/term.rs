@@ -1,14 +1,15 @@
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VarType {
     Independent, // $
     Dependent,   // #
     Query,       // ?
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Operator {
     Inheritance,      // -->
     Implication,      // ==>
@@ -31,6 +32,9 @@ pub enum Operator {
     ConcurrentImplication, // =|>
     PredictiveImplication, // =/>
     RetrospectiveImplication, // =\>
+    ConcurrentEquivalence, // <|>
+    PredictiveEquivalence, // </>
+    RetrospectiveEquivalence, // <\>
     ParallelEvents,   // &|
     SequentialEvents, // &/
     List,             // #
@@ -38,7 +42,7 @@ pub enum Operator {
     Other(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Term {
     Atom(u64),
     Var(VarType, u64),

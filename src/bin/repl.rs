@@ -45,6 +45,28 @@ fn main() -> Result<()> {
         } else if trimmed == ".stats" {
             println!("Concepts in Memory: {}", system.memory.len());
             continue;
+        } else if trimmed.starts_with(".export ") {
+            let filename = trimmed[8..].trim();
+            if filename.is_empty() {
+                println!("Usage: .export <filename>");
+                continue;
+            }
+            
+            let file = match std::fs::File::create(filename) {
+                Ok(f) => f,
+                Err(e) => {
+                    println!("Failed to create file: {}", e);
+                    continue;
+                }
+            };
+            let writer = std::io::BufWriter::new(file);
+            let concepts: Vec<_> = system.memory.values().collect();
+            if let Err(e) = serde_json::to_writer(writer, &concepts) {
+                println!("Failed to serialize memory: {}", e);
+            } else {
+                println!("Memory exported to {}", filename);
+            }
+            continue;
         }
 
         if trimmed.is_empty() {
@@ -52,9 +74,9 @@ fn main() -> Result<()> {
         }
 
         match parse_narsese(trimmed) {
-            Ok((_, sentence)) => {
+            Ok(sentence) => {
                 println!("Parsed: {:?}", sentence);
-                let vector = Hypervector::random();
+                let vector = Hypervector::from_term(&sentence.term);
                 let concept = Concept::new(sentence.term, vector, sentence.truth, sentence.stamp);
                 system.add_concept(concept);
 
