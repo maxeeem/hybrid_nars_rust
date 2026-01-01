@@ -2,7 +2,9 @@ use anyhow::Result;
 use hybrid_nars_rust::nars::control::NarsSystem;
 use hybrid_nars_rust::nars::parser::parse_narsese;
 use hybrid_nars_rust::nars::memory::{Concept, Hypervector};
-use hybrid_nars_rust::nars::term::Term;
+use hybrid_nars_rust::nars::term::{Term, Operator};
+use hybrid_nars_rust::nars::sentence::{Sentence, Punctuation, Stamp};
+use hybrid_nars_rust::nars::truth::TruthValue;
 use std::io::{self, Write};
 
 fn main() -> Result<()> {
@@ -74,6 +76,30 @@ fn main() -> Result<()> {
                 println!("Memory exported to {}", filename);
             }
             continue;
+        } else if trimmed.starts_with(".save ") {
+            let filename = trimmed[6..].trim();
+            if filename.is_empty() {
+                println!("Usage: .save <filename>");
+                continue;
+            }
+            if let Err(e) = system.save_memory(filename) {
+                println!("Failed to save memory: {}", e);
+            } else {
+                println!("Memory saved to {}", filename);
+            }
+            continue;
+        } else if trimmed.starts_with(".load ") {
+            let filename = trimmed[6..].trim();
+            if filename.is_empty() {
+                println!("Usage: .load <filename>");
+                continue;
+            }
+            if let Err(e) = system.load_memory(filename) {
+                println!("Failed to load memory: {}", e);
+            } else {
+                println!("Memory loaded from {}", filename);
+            }
+            continue;
         } else if trimmed.starts_with(".drift ") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() != 3 {
@@ -137,6 +163,67 @@ fn main() -> Result<()> {
                     }
                 },
                 Err(e) => println!("Error parsing injection: {:?}", e),
+            }
+            continue;
+        } else if trimmed.starts_with(".drift_transitive ") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() != 4 {
+                println!("Usage: .drift_transitive <A> <B> <C>");
+                continue;
+            }
+            let a_str = parts[1];
+            let b_str = parts[2];
+            let c_str = parts[3];
+            
+            let term_a = Term::Atom(a_str.to_string());
+            let term_b = Term::Atom(b_str.to_string());
+            let term_c = Term::Atom(c_str.to_string());
+
+            // Helper to get vector
+            let get_vector = |sys: &NarsSystem, t: &Term| -> Hypervector {
+                if let Some(c) = sys.memory.get(t) {
+                    c.vector
+                } else {
+                    Hypervector::from_term(t)
+                }
+            };
+
+            // Measure Sim(A, C)
+            let v_a_initial = get_vector(&system, &term_a);
+            let v_c_initial = get_vector(&system, &term_c);
+            let sim_initial = v_a_initial.similarity(&v_c_initial);
+            println!("Initial Sim({}, {}): {:.4}", a_str, c_str, sim_initial);
+
+            // Input <A --> B>
+            let stmt1 = Term::Compound(Operator::Inheritance, vec![term_a.clone(), term_b.clone()]);
+            let sent1 = Sentence::new(stmt1, Punctuation::Judgement, TruthValue::new(1.0, 0.9), Stamp::new(0, vec![]));
+            system.input(sent1);
+            println!("Input: <{} --> {}>", a_str, b_str);
+
+            // Input <B --> C>
+            let stmt2 = Term::Compound(Operator::Inheritance, vec![term_b.clone(), term_c.clone()]);
+            let sent2 = Sentence::new(stmt2, Punctuation::Judgement, TruthValue::new(1.0, 0.9), Stamp::new(0, vec![]));
+            system.input(sent2);
+            println!("Input: <{} --> {}>", b_str, c_str);
+
+            // Run 50 cycles
+            println!("Running 50 cycles...");
+            for _ in 0..50 {
+                system.cycle();
+            }
+
+            // Measure Sim(A, C)
+            let v_a_final = get_vector(&system, &term_a);
+            let v_c_final = get_vector(&system, &term_c);
+            let sim_final = v_a_final.similarity(&v_c_final);
+            println!("Final Sim({}, {}): {:.4}", a_str, c_str, sim_final);
+
+            let drift = sim_final - sim_initial;
+            println!("Drift: {:.4}", drift);
+            if drift > 0.0 {
+                println!("SUCCESS: {} moved towards {}", a_str, c_str);
+            } else {
+                println!("FAILURE: {} did not move towards {}", a_str, c_str);
             }
             continue;
         }

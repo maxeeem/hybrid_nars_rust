@@ -1,6 +1,8 @@
 use std::collections::{HashMap, BinaryHeap};
 use std::cmp::Ordering;
-use super::term::Term;
+use std::fs::File;
+use std::error::Error;
+use super::term::{Term, Operator};
 use super::memory::{Concept, Hypervector};
 use super::rules::{InferenceRule, TruthFunction};
 use super::static_rules::get_all_rules;
@@ -82,6 +84,7 @@ impl NarsSystem {
     }
 
     pub fn add_concept(&mut self, concept: Concept) {
+        // 1. Main Logic: Add/Update the concept itself (<S --> P>)
         if let Some(existing_concept) = self.memory.get_mut(&concept.term) {
             // Revision
             let revised_truth = revision(existing_concept.truth, concept.truth);
@@ -101,8 +104,33 @@ impl NarsSystem {
                 concept_term: concept.term.clone(),
                 priority: concept.priority,
             };
-            self.memory.insert(concept.term.clone(), concept);
+            self.memory.insert(concept.term.clone(), concept.clone());
             self.buffer.push(task);
+        }
+
+        // 2. Vector Learning Logic
+        // Trigger: When a concept S accepts a new belief <S --> P> (whether input or derived)
+        // Action: Nudge S.vector towards P.vector.
+        if let Term::Compound(Operator::Inheritance, args) = &concept.term {
+            if args.len() == 2 {
+                let subject_term = &args[0];
+                let predicate_term = &args[1];
+                
+                // Resolve P vector (requires &self)
+                // We clone terms to avoid borrowing issues if we need to mutate self later
+                let subject_term = subject_term.clone();
+                let predicate_term = predicate_term.clone();
+                
+                let p_vector = self.resolve_vector(&predicate_term);
+                
+                // Update S vector (requires &mut self)
+                // Ensure S exists so we can update its vector
+                let s_concept = self.memory.entry(subject_term.clone()).or_insert_with(|| {
+                    let vector = Hypervector::from_term(&subject_term);
+                    Concept::new(subject_term.clone(), vector, TruthValue::new(0.5, 0.0), Stamp::new(0, vec![]))
+                });
+                s_concept.vector.update(&p_vector, self.learning_rate);
+            }
         }
     }
 
@@ -308,6 +336,19 @@ impl NarsSystem {
 
     pub fn load_embeddings_from_file(&mut self, path: &str) -> std::io::Result<()> {
         load_embeddings(path, self)
+    }
+
+    pub fn save_memory(&self, filename: &str) -> Result<(), Box<dyn Error>> {
+        let f = File::create(filename)?;
+        bincode::serialize_into(f, &self.memory)?;
+        Ok(())
+    }
+
+    pub fn load_memory(&mut self, filename: &str) -> Result<(), Box<dyn Error>> {
+        let f = File::open(filename)?;
+        let map: HashMap<Term, Concept> = bincode::deserialize_from(f)?;
+        self.memory = map;
+        Ok(())
     }
 }
 
