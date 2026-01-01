@@ -8,5 +8,6 @@ pub mod control;
 pub mod parser;
 pub mod static_rules;
 pub mod glove;
+pub mod bag;
 mod tests;
 mod tests_integration;

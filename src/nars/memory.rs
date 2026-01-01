@@ -2,6 +2,8 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use super::bag::Bag;
 use super::term::{Term, Operator, deterministic_hash};
 use super::truth::TruthValue;
 use super::sentence::{Sentence, Stamp};
@@ -280,6 +282,65 @@ impl Concept {
             self.beliefs.remove(0);
         }
         self.beliefs.push(belief);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ConceptStore {
+    pub map: HashMap<Term, Concept>,
+    #[serde(skip)] // Bag is rebuilt on load (or transient)
+    pub priority_bag: Bag<Term>, 
+    pub capacity: usize,
+}
+
+impl ConceptStore {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            priority_bag: Bag::new(capacity),
+            capacity,
+        }
+    }
+
+    pub fn put(&mut self, concept: Concept) {
+        // 1. Evict if needed (only if adding a NEW key)
+        if !self.map.contains_key(&concept.term) && self.map.len() >= self.capacity {
+            self.forget_weakest();
+        }
+
+        // 2. Update Priority Bag
+        // Utility = P * D (Stability)
+        let utility = (concept.priority * concept.durability).clamp(0.01, 0.99);
+        self.priority_bag.put(concept.term.clone(), utility);
+
+        // 3. Update Storage
+        self.map.insert(concept.term.clone(), concept);
+    }
+
+    pub fn get(&self, term: &Term) -> Option<&Concept> {
+        self.map.get(term)
+    }
+    
+    pub fn get_mut(&mut self, term: &Term) -> Option<&mut Concept> {
+        self.map.get_mut(term)
+    }
+    
+    pub fn values(&self) -> std::collections::hash_map::Values<Term, Concept> {
+        self.map.values()
+    }
+    
+    pub fn keys(&self) -> std::collections::hash_map::Keys<Term, Concept> {
+        self.map.keys()
+    }
+    
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    fn forget_weakest(&mut self) {
+        if let Some(weak_term) = self.priority_bag.take_weakest() {
+            self.map.remove(&weak_term);
+        }
     }
 }
 

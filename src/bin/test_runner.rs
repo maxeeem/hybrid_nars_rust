@@ -181,12 +181,12 @@ fn normalize_term(term: &Term) -> Term {
     normalize_term_recursive(term, &mut mapping, &mut counters)
 }
 
-fn normalize_term_recursive(term: &Term, mapping: &mut HashMap<String, u64>, counters: &mut (usize, usize, usize)) -> Term {
+fn normalize_term_recursive(term: &Term, mapping: &mut HashMap<String, String>, counters: &mut (usize, usize, usize)) -> Term {
     match term {
         Term::Var(vtype, id) => {
             let key = format!("{:?}:{}", vtype, id);
             if let Some(new_id) = mapping.get(&key) {
-                Term::Var(*vtype, *new_id)
+                Term::Var(*vtype, new_id.clone())
             } else {
                 let new_name = match vtype {
                     VarType::Independent => {
@@ -206,9 +206,9 @@ fn normalize_term_recursive(term: &Term, mapping: &mut HashMap<String, u64>, cou
                     },
                 };
                 let new_term = Term::var_from_str(*vtype, &new_name);
-                if let Term::Var(_, new_id) = new_term {
-                    mapping.insert(key, new_id);
-                    new_term
+                if let Term::Var(_, new_id) = &new_term {
+                    mapping.insert(key, new_id.clone());
+                    new_term.clone()
                 } else {
                     unreachable!()
                 }

@@ -1,9 +1,10 @@
-use std::collections::{HashMap, BinaryHeap};
+use std::collections::HashMap;
 use std::cmp::Ordering;
 use std::fs::File;
 use std::error::Error;
 use super::term::{Term, Operator};
-use super::memory::{Concept, Hypervector};
+use super::memory::{Concept, Hypervector, ConceptStore};
+use super::bag::Bag;
 use super::rules::{InferenceRule, TruthFunction};
 use super::static_rules::get_all_rules;
 use super::glove::load_embeddings;
@@ -11,50 +12,22 @@ use super::unify::{unify_with_bindings, Bindings};
 use super::sentence::{Sentence, Punctuation, Stamp};
 use super::truth::{TruthValue, revision};
 
-#[derive(Debug)]
-struct Task {
-    concept_term: Term,
-    priority: f32,
-}
-
-impl PartialEq for Task {
-    fn eq(&self, other: &Self) -> bool {
-        self.priority == other.priority
-    }
-}
-
-impl Eq for Task {}
-
-impl PartialOrd for Task {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.priority.partial_cmp(&other.priority)
-    }
-}
-
-impl Ord for Task {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
-    }
-}
-
 pub struct NarsSystem {
-    pub memory: HashMap<Term, Concept>,
+    pub memory: ConceptStore,
     pub rules: Vec<InferenceRule>,
-    buffer: BinaryHeap<Task>,
-    learning_rate: f32,
-    similarity_threshold: f32,
+    pub buffer: Bag<Term>,
+    pub learning_rate: f32,
+    pub similarity_threshold: f32,
     pub output_buffer: Vec<Sentence>,
 }
 
 impl NarsSystem {
     pub fn new(learning_rate: f32, similarity_threshold: f32) -> Self {
-        // Load rules from static configuration
         let rules = get_all_rules();
-        
         Self {
-            memory: HashMap::new(),
+            memory: ConceptStore::new(10000),
             rules,
-            buffer: BinaryHeap::new(),
+            buffer: Bag::new(100),
             learning_rate,
             similarity_threshold,
             output_buffer: Vec::new(),
@@ -65,12 +38,9 @@ impl NarsSystem {
         if let Some(concept) = self.memory.get(term) {
             return concept.vector;
         }
-
         match term {
             Term::Compound(op, args) => {
-                let arg_vectors: Vec<Hypervector> = args.iter()
-                    .map(|arg| self.resolve_vector(arg))
-                    .collect();
+                let arg_vectors: Vec<Hypervector> = args.iter().map(|a| self.resolve_vector(a)).collect();
                 Hypervector::compound(op, &arg_vectors)
             },
             _ => Hypervector::from_term(term),
@@ -83,145 +53,109 @@ impl NarsSystem {
         self.add_concept(concept, sentence.punctuation == Punctuation::Judgement);
     }
 
-    pub fn add_concept(&mut self, concept: Concept, is_judgement: bool) {
-        // 1. Main Logic: Add/Update the concept itself (<S --> P>)
-        if let Some(existing_concept) = self.memory.get_mut(&concept.term) {
-            if is_judgement {
-                // Revision
-                let revised_truth = revision(existing_concept.truth, concept.truth);
-                existing_concept.truth = revised_truth;
-                
-                // Add belief to existing concept
-                let belief = Sentence::new(concept.term.clone(), Punctuation::Judgement, concept.truth, concept.stamp.clone());
-                existing_concept.add_belief(belief);
+    pub fn add_concept(&mut self, mut concept: Concept, is_judgement: bool) {
+        let existing_concept_opt = self.memory.get(&concept.term).cloned();
 
-                // Emit revised sentence
-                let sentence = Sentence::new(existing_concept.term.clone(), Punctuation::Judgement, revised_truth, existing_concept.stamp.clone());
-                self.output_buffer.push(sentence);
-            }
-
-            let task = Task {
-                concept_term: existing_concept.term.clone(),
-                priority: existing_concept.priority,
-            };
-            self.buffer.push(task);
+        if let Some(mut existing_concept) = existing_concept_opt {
+             if is_judgement {
+                 let revised_truth = revision(existing_concept.truth, concept.truth);
+                 existing_concept.truth = revised_truth;
+                 let belief = Sentence::new(concept.term.clone(), Punctuation::Judgement, concept.truth, concept.stamp.clone());
+                 existing_concept.add_belief(belief);
+                 let sent = Sentence::new(existing_concept.term.clone(), Punctuation::Judgement, revised_truth, existing_concept.stamp.clone());
+                 self.output_buffer.push(sent);
+             }
+             self.memory.put(existing_concept.clone());
+             
+             let priority = (existing_concept.priority * existing_concept.durability).clamp(0.01, 0.99);
+             self.buffer.put(existing_concept.term.clone(), priority);
         } else {
-            let mut new_concept = concept.clone();
-            if is_judgement {
-                // Add belief to new concept
-                let belief = Sentence::new(concept.term.clone(), Punctuation::Judgement, concept.truth, concept.stamp.clone());
-                new_concept.add_belief(belief);
-            }
-
-            let task = Task {
-                concept_term: new_concept.term.clone(),
-                priority: new_concept.priority,
-            };
-            self.memory.insert(new_concept.term.clone(), new_concept);
-            self.buffer.push(task);
+             if is_judgement {
+                 let belief = Sentence::new(concept.term.clone(), Punctuation::Judgement, concept.truth, concept.stamp.clone());
+                 concept.add_belief(belief);
+             }
+             self.memory.put(concept.clone());
+             let priority = (concept.priority * concept.durability).clamp(0.01, 0.99);
+             self.buffer.put(concept.term.clone(), priority);
         }
-
-        // 2. Vector Learning Logic
-        // Trigger: When a concept S accepts a new belief <S --> P> (whether input or derived)
-        // Action: Nudge S.vector towards P.vector.
+        
+        // Vector Learning Logic
         if is_judgement {
             if let Term::Compound(Operator::Inheritance, args) = &concept.term {
                 if args.len() == 2 {
                     let subject_term = &args[0];
                     let predicate_term = &args[1];
                     
-                    // Resolve P vector (requires &self)
-                    // We clone terms to avoid borrowing issues if we need to mutate self later
+                    let p_vector = self.resolve_vector(predicate_term);
+                    
                     let subject_term = subject_term.clone();
-                    let predicate_term = predicate_term.clone();
                     
-                    let p_vector = self.resolve_vector(&predicate_term);
-                    
-                    // Update S vector (requires &mut self)
-                    // Ensure S exists so we can update its vector
-                    let s_concept = self.memory.entry(subject_term.clone()).or_insert_with(|| {
+                    let mut s_concept = if let Some(c) = self.memory.get(&subject_term) {
+                        c.clone()
+                    } else {
                         let vector = Hypervector::from_term(&subject_term);
                         Concept::new(subject_term.clone(), vector, TruthValue::new(0.5, 0.0), Stamp::new(0, vec![]))
-                    });
+                    };
+                    
                     s_concept.vector.update(&p_vector, self.learning_rate);
+                    self.memory.put(s_concept);
                 }
             }
         }
     }
 
     pub fn cycle(&mut self) {
-        // Step 1: Selection
-        let task = match self.buffer.pop() {
+        // 1. Selection (Probabilistic from Bag)
+        let term_a = match self.buffer.take() {
             Some(t) => t,
             None => return,
         };
         
-        let term_a = task.concept_term.clone();
-        
-        // Debug print
-        // println!("Selected term: {}", term_a);
-        // println!("Term structure: {:?}", term_a);
+        // Retrieve Concept A
+        let concept_a = match self.memory.get(&term_a) {
+            Some(c) => c.clone(),
+            None => return,
+        };
 
-        // 2. Association (Concept lookup/creation)
-        let concept_a = self.memory.entry(term_a.clone()).or_insert_with(|| {
-            let vector = Hypervector::from_term(&term_a);
-            // This fallback should rarely happen if tasks are managed correctly
-            Concept::new(term_a.clone(), vector, TruthValue::new(0.5, 0.0), Stamp::new(0, vec![]))
-        }).clone();
-        
-        // Reconstruct sentence for debug/logic
-        let sentence = Sentence::new(term_a.clone(), Punctuation::Judgement, concept_a.truth, concept_a.stamp.clone());
-        // println!("Selected sentence: {:?}", sentence);
-        // println!("Term structure: {:?}", sentence.term);
+        // 2. Association (Random Sampling for AIKR)
+        // We cannot scan all memory. We take a sample of keys.
+        let sample_size = 20;
+        let partners: Vec<Term> = self.memory.keys()
+            .take(sample_size * 3) // Grab a chunk (HashMap order is pseudo-random)
+            .filter(|t| **t != term_a)
+            .take(sample_size)
+            .cloned()
+            .collect();
 
-        // Step 3: Reasoning
-        // Immediate reasoning with the selected concept
-        self.reason_single(&concept_a);
-
-        // Find similar concepts in memory to form associations
-        let mut partners = Vec::new();
-        
-        // Limit the number of partners to avoid performance explosion
-        let max_partners = 20;
-        
-        for (term_b, concept_b) in &self.memory {
-            if *term_b == term_a {
-                continue;
-            }
-            let sim = concept_a.vector.similarity(&concept_b.vector);
-            if sim > self.similarity_threshold {
-                partners.push(term_b.clone());
-                if partners.len() >= max_partners {
-                    break;
-                }
-            }
-        }
-        
-        // println!("Partners found: {}", partners.len());
-
+        // 3. Geometric Attention ("The Pull")
         for term_b in partners {
             if let Some(concept_b) = self.memory.get(&term_b) {
-                let concept_b = concept_b.clone();
+                let sim = concept_a.vector.similarity(&concept_b.vector);
                 
-                // println!("Calling reason for A and B");
-                // Step 3: Reasoning
-                self.reason(&concept_a, &concept_b);
-                self.reason(&concept_b, &concept_a);
-
-                // Step 5: Learning (Hebbian)
-                // Update vectors in memory
-                // Note: We need to re-borrow mutably, so we can't hold concept_b ref
-                // But we cloned concept_b, so it's fine.
-                // However, we need to get mutable ref to concept_a and concept_b in memory.
-                
-                if let Some(c_a) = self.memory.get_mut(&term_a) {
-                    c_a.vector.update(&concept_b.vector, self.learning_rate);
-                }
-                if let Some(c_b) = self.memory.get_mut(&term_b) {
-                    c_b.vector.update(&concept_a.vector, self.learning_rate);
+                if sim >= self.similarity_threshold {
+                    // Activate B (Pull into Attention)
+                    // If A is active, and A~B, then B becomes active.
+                    let new_p = (sim * 0.9).clamp(0.01, 0.99);
+                    self.buffer.put(term_b.clone(), new_p);
+                    
+                    // Reason
+                    // Cloning to satisfy borrow checker
+                    let cb = concept_b.clone();
+                    self.reason(&concept_a, &cb);
+                    self.reason(&cb, &concept_a);
+                    
+                    // Hebbian Learning
+                    if let Some(c_a) = self.memory.get_mut(&term_a) {
+                        c_a.vector.update(&cb.vector, self.learning_rate);
+                    }
+                    if let Some(c_b) = self.memory.get_mut(&term_b) {
+                        c_b.vector.update(&concept_a.vector, self.learning_rate);
+                    }
                 }
             }
         }
+        
+        self.reason_single(&concept_a);
     }
 
     fn reason(&mut self, concept_a: &Concept, concept_b: &Concept) {
@@ -356,8 +290,13 @@ impl NarsSystem {
 
     pub fn load_memory(&mut self, filename: &str) -> Result<(), Box<dyn Error>> {
         let f = File::open(filename)?;
-        let map: HashMap<Term, Concept> = bincode::deserialize_from(f)?;
-        self.memory = map;
+        let mut store: ConceptStore = bincode::deserialize_from(f)?;
+        // Rebuild bag
+        for (term, concept) in store.map.iter() {
+             let utility = (concept.priority * concept.durability).clamp(0.01, 0.99);
+             store.priority_bag.put(term.clone(), utility);
+        }
+        self.memory = store;
         Ok(())
     }
 
