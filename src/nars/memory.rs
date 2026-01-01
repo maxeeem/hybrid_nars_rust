@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use super::term::{Term, Operator, deterministic_hash};
 use super::truth::TruthValue;
-use super::sentence::Stamp;
+use super::sentence::{Sentence, Stamp};
 use serde::{Serialize, Deserialize};
 use serde_big_array::BigArray;
 
@@ -256,6 +256,7 @@ pub struct Concept {
     pub durability: f32,
     pub truth: TruthValue,
     pub stamp: Stamp,
+    pub beliefs: Vec<Sentence>,
 }
 
 impl Concept {
@@ -267,7 +268,18 @@ impl Concept {
             durability: 0.5, // Default
             truth,
             stamp,
+            beliefs: Vec::new(),
         }
+    }
+
+    pub fn add_belief(&mut self, belief: Sentence) {
+        // Check if belief already exists (by stamp or content) to avoid duplicates?
+        // For now, just add it as requested.
+        // Maybe limit the size of beliefs?
+        if self.beliefs.len() > 100 {
+            self.beliefs.remove(0);
+        }
+        self.beliefs.push(belief);
     }
 }
 

@@ -20,7 +20,7 @@ pub fn load_embeddings(path: &str, system: &mut NarsSystem) -> io::Result<()> {
             Ok(concepts) => {
                 println!("Loaded {} concepts from cache.", concepts.len());
                 for concept in concepts {
-                    system.add_concept(concept);
+                    system.add_concept(concept, false);
                 }
                 return Ok(());
             },
@@ -107,7 +107,7 @@ pub fn load_embeddings(path: &str, system: &mut NarsSystem) -> io::Result<()> {
 
     // Add to system
     for concept in concepts {
-        system.add_concept(concept);
+        system.add_concept(concept, false);
     }
 
     Ok(())

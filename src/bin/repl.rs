@@ -135,12 +135,12 @@ fn main() -> Result<()> {
                     // Activate the terms themselves to facilitate interaction
                     if let Some(mut c1) = system.memory.get(&term1).cloned() {
                         c1.priority = 0.99; // Boost priority
-                        system.add_concept(c1);
+                        system.add_concept(c1, false);
                     }
 
                     if let Some(mut c2) = system.memory.get(&term2).cloned() {
                         c2.priority = 0.99; // Boost priority
-                        system.add_concept(c2);
+                        system.add_concept(c2, false);
                     }
 
                     println!("Running 20 cycles...");
@@ -235,13 +235,31 @@ fn main() -> Result<()> {
         match parse_narsese(trimmed) {
             Ok(sentence) => {
                 println!("Parsed: {:?}", sentence);
-                let vector = Hypervector::from_term(&sentence.term);
-                let concept = Concept::new(sentence.term, vector, sentence.truth, sentence.stamp);
-                system.add_concept(concept);
+                
+                // Run the input
+                system.input(sentence.clone());
 
-                println!("Running 5 cycles...");
-                for _ in 0..5 {
+                // Run inference cycles
+                print!("Thinking...");
+                io::stdout().flush().unwrap();
+                for _ in 0..10 {
                     system.cycle();
+                    print!(".");
+                    io::stdout().flush().unwrap();
+                }
+                println!();
+
+                // IF it was a Question, look for the answer
+                if sentence.punctuation == Punctuation::Question {
+                    if let Some(answer) = system.answer_query(&sentence.term) {
+                        println!("Answer: {} %{:.2};{:.2}%", 
+                            answer.term.to_display_string(), 
+                            answer.truth.frequency, 
+                            answer.truth.confidence
+                        );
+                    } else {
+                        println!("Answer: I don't know.");
+                    }
                 }
                 
                 // Print top concepts in memory (simple debug view)

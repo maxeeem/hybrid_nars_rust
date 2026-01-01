@@ -80,19 +80,25 @@ impl NarsSystem {
     pub fn input(&mut self, sentence: Sentence) {
         let vector = self.resolve_vector(&sentence.term);
         let concept = Concept::new(sentence.term, vector, sentence.truth, sentence.stamp);
-        self.add_concept(concept);
+        self.add_concept(concept, sentence.punctuation == Punctuation::Judgement);
     }
 
-    pub fn add_concept(&mut self, concept: Concept) {
+    pub fn add_concept(&mut self, concept: Concept, is_judgement: bool) {
         // 1. Main Logic: Add/Update the concept itself (<S --> P>)
         if let Some(existing_concept) = self.memory.get_mut(&concept.term) {
-            // Revision
-            let revised_truth = revision(existing_concept.truth, concept.truth);
-            existing_concept.truth = revised_truth;
-            
-            // Emit revised sentence
-            let sentence = Sentence::new(existing_concept.term.clone(), Punctuation::Judgement, revised_truth, existing_concept.stamp.clone());
-            self.output_buffer.push(sentence);
+            if is_judgement {
+                // Revision
+                let revised_truth = revision(existing_concept.truth, concept.truth);
+                existing_concept.truth = revised_truth;
+                
+                // Add belief to existing concept
+                let belief = Sentence::new(concept.term.clone(), Punctuation::Judgement, concept.truth, concept.stamp.clone());
+                existing_concept.add_belief(belief);
+
+                // Emit revised sentence
+                let sentence = Sentence::new(existing_concept.term.clone(), Punctuation::Judgement, revised_truth, existing_concept.stamp.clone());
+                self.output_buffer.push(sentence);
+            }
 
             let task = Task {
                 concept_term: existing_concept.term.clone(),
@@ -100,36 +106,45 @@ impl NarsSystem {
             };
             self.buffer.push(task);
         } else {
+            let mut new_concept = concept.clone();
+            if is_judgement {
+                // Add belief to new concept
+                let belief = Sentence::new(concept.term.clone(), Punctuation::Judgement, concept.truth, concept.stamp.clone());
+                new_concept.add_belief(belief);
+            }
+
             let task = Task {
-                concept_term: concept.term.clone(),
-                priority: concept.priority,
+                concept_term: new_concept.term.clone(),
+                priority: new_concept.priority,
             };
-            self.memory.insert(concept.term.clone(), concept.clone());
+            self.memory.insert(new_concept.term.clone(), new_concept);
             self.buffer.push(task);
         }
 
         // 2. Vector Learning Logic
         // Trigger: When a concept S accepts a new belief <S --> P> (whether input or derived)
         // Action: Nudge S.vector towards P.vector.
-        if let Term::Compound(Operator::Inheritance, args) = &concept.term {
-            if args.len() == 2 {
-                let subject_term = &args[0];
-                let predicate_term = &args[1];
-                
-                // Resolve P vector (requires &self)
-                // We clone terms to avoid borrowing issues if we need to mutate self later
-                let subject_term = subject_term.clone();
-                let predicate_term = predicate_term.clone();
-                
-                let p_vector = self.resolve_vector(&predicate_term);
-                
-                // Update S vector (requires &mut self)
-                // Ensure S exists so we can update its vector
-                let s_concept = self.memory.entry(subject_term.clone()).or_insert_with(|| {
-                    let vector = Hypervector::from_term(&subject_term);
-                    Concept::new(subject_term.clone(), vector, TruthValue::new(0.5, 0.0), Stamp::new(0, vec![]))
-                });
-                s_concept.vector.update(&p_vector, self.learning_rate);
+        if is_judgement {
+            if let Term::Compound(Operator::Inheritance, args) = &concept.term {
+                if args.len() == 2 {
+                    let subject_term = &args[0];
+                    let predicate_term = &args[1];
+                    
+                    // Resolve P vector (requires &self)
+                    // We clone terms to avoid borrowing issues if we need to mutate self later
+                    let subject_term = subject_term.clone();
+                    let predicate_term = predicate_term.clone();
+                    
+                    let p_vector = self.resolve_vector(&predicate_term);
+                    
+                    // Update S vector (requires &mut self)
+                    // Ensure S exists so we can update its vector
+                    let s_concept = self.memory.entry(subject_term.clone()).or_insert_with(|| {
+                        let vector = Hypervector::from_term(&subject_term);
+                        Concept::new(subject_term.clone(), vector, TruthValue::new(0.5, 0.0), Stamp::new(0, vec![]))
+                    });
+                    s_concept.vector.update(&p_vector, self.learning_rate);
+                }
             }
         }
     }
@@ -289,9 +304,7 @@ impl NarsSystem {
         let new_stamp = concept.stamp.clone(); 
         
         // Debug Output
-        // println!("Single Inference:");
-        // println!("  Premise: {:?} Truth: {:?}", concept.term, concept.truth);
-        // println!("  Derived: {:?} Truth: {:?}", conclusion_term, new_truth);
+        println!("[DEBUG] Derived: {:?} %{};{}%", conclusion_term, new_truth.frequency, new_truth.confidence);
 
         // For immediate inference, we can reuse the vector or project it. 
         // Reusing it implies semantic similarity which is often true for conversion/contraposition.
@@ -301,7 +314,7 @@ impl NarsSystem {
         
         let sentence = Sentence::new(conclusion_term, Punctuation::Judgement, new_truth, new_stamp);
         self.output_buffer.push(sentence);
-        self.add_concept(new_concept);
+        self.add_concept(new_concept, true);
     }
 
     fn execute_inference_logic(&mut self, conclusion_template: Term, truth_fn: fn(TruthValue, TruthValue) -> TruthValue, bindings: &Bindings, concept_a: &Concept, concept_b: &Concept) {
@@ -315,10 +328,7 @@ impl NarsSystem {
         let new_stamp = concept_a.stamp.merge(&concept_b.stamp);
 
         // Debug Output
-        // println!("Inference:");
-        // println!("  Premise 1: {:?} Truth: {:?}", concept_a.term, concept_a.truth);
-        // println!("  Premise 2: {:?} Truth: {:?}", concept_b.term, concept_b.truth);
-        // println!("  Derived: {:?} Truth: {:?}", conclusion_term, new_truth);
+        println!("[DEBUG] Derived: {:?} %{};{}%", conclusion_term, new_truth.frequency, new_truth.confidence);
 
         // Create new Concept
         let new_vector = Hypervector::bundle(&[concept_a.vector, concept_b.vector]);
@@ -330,7 +340,7 @@ impl NarsSystem {
         self.output_buffer.push(sentence);
         
         // Add to system
-        self.add_concept(new_concept);
+        self.add_concept(new_concept, true);
     }
 
 
@@ -349,6 +359,17 @@ impl NarsSystem {
         let map: HashMap<Term, Concept> = bincode::deserialize_from(f)?;
         self.memory = map;
         Ok(())
+    }
+
+    pub fn answer_query(&self, term: &Term) -> Option<Sentence> {
+        if let Some(concept) = self.memory.get(term) {
+            // Only return beliefs with actual confidence
+            return concept.beliefs.iter()
+                .filter(|b| b.truth.confidence > 0.01)
+                .max_by(|a, b| a.truth.confidence.partial_cmp(&b.truth.confidence).unwrap())
+                .cloned();
+        }
+        None
     }
 }
 
