@@ -1,0 +1,8 @@
+<cat --> animal>.
+<dog --> animal>.
+<wolf --> animal>.
+<car --> vehicle>.
+<truck --> vehicle>.
+<bicycle --> vehicle>.
+.export mind.json
+exit

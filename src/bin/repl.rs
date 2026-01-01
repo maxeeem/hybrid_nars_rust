@@ -8,7 +8,8 @@ fn main() -> Result<()> {
     println!("Hybrid NARS Rust REPL");
     println!("Type Narsese input or 'exit' to quit.");
 
-    let mut system = NarsSystem::new(0.1, 0.5);
+    // Increase similarity threshold to 0.55 to avoid matching random noise
+    let mut system = NarsSystem::new(0.1, 0.55);
 
     // Load embeddings
     let glove_path = "assets/glove.txt";
@@ -52,8 +53,21 @@ fn main() -> Result<()> {
                 }
             };
             let writer = std::io::BufWriter::new(file);
-            let concepts: Vec<_> = system.memory.values().collect();
-            if let Err(e) = serde_json::to_writer(writer, &concepts) {
+            
+            let export_data: Vec<serde_json::Value> = system.memory.values().map(|concept| {
+                let term_str = match &concept.term {
+                    hybrid_nars_rust::nars::term::Term::Atom(s) => s.clone(),
+                    _ => concept.term.to_display_string(),
+                };
+                
+                serde_json::json!({
+                    "term": term_str,
+                    "usage": (concept.priority * 100.0) as u32, // Mock usage from priority
+                    "vector": concept.vector.bits.to_vec()
+                })
+            }).collect();
+
+            if let Err(e) = serde_json::to_writer(writer, &export_data) {
                 println!("Failed to serialize memory: {}", e);
             } else {
                 println!("Memory exported to {}", filename);

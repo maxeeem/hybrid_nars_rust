@@ -2,7 +2,7 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
-use super::term::Term;
+use super::term::{Term, deterministic_hash};
 use super::truth::TruthValue;
 use super::sentence::Stamp;
 use serde::{Serialize, Deserialize};
@@ -10,6 +10,25 @@ use serde_big_array::BigArray;
 
 const HV_DIM_U64: usize = 157; // 157 * 64 = 10048 bits
 const HV_DIM_BITS: usize = HV_DIM_U64 * 64;
+
+pub struct ProjectionMatrix {
+    weights: Vec<Vec<f32>>, // [bit_idx][input_dim]
+}
+
+impl ProjectionMatrix {
+    pub fn new(input_dim: usize) -> Self {
+        let mut weights = Vec::with_capacity(HV_DIM_BITS);
+        for bit_idx in 0..HV_DIM_BITS {
+            let mut rng = StdRng::seed_from_u64(bit_idx as u64);
+            let mut row = Vec::with_capacity(input_dim);
+            for _ in 0..input_dim {
+                row.push(rng.random_range(-1.0..1.0));
+            }
+            weights.push(row);
+        }
+        Self { weights }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Hypervector {
@@ -110,6 +129,31 @@ impl Hypervector {
         Self { bits: result }
     }
 
+    /// Faster projection using pre-computed matrix
+    pub fn project_with_matrix(dense_vector: &[f32], matrix: &ProjectionMatrix) -> Hypervector {
+        let mut result = [0; HV_DIM_U64];
+
+        for bit_idx in 0..HV_DIM_BITS {
+            let weights = &matrix.weights[bit_idx];
+            
+            // Compute dot product
+            let mut dot_product = 0.0;
+            for (i, &val) in dense_vector.iter().enumerate() {
+                if i < weights.len() {
+                    dot_product += val * weights[i];
+                }
+            }
+
+            if dot_product > 0.0 {
+                let u64_idx = bit_idx / 64;
+                let bit_offset = bit_idx % 64;
+                result[u64_idx] |= 1 << bit_offset;
+            }
+        }
+
+        Self { bits: result }
+    }
+
     /// Weighted bundle update (Hebbian Learning).
     pub fn update(&mut self, new_info: &Hypervector, weight: f32) {
         // Create a list of vectors for bundling
@@ -132,16 +176,18 @@ impl Hypervector {
 
     pub fn from_term(term: &Term) -> Self {
         match term {
-            Term::Atom(id) => {
-                let mut rng = StdRng::seed_from_u64(*id);
+            Term::Atom(s) => {
+                let id = deterministic_hash(s);
+                let mut rng = StdRng::seed_from_u64(id);
                 let mut bits = [0; HV_DIM_U64];
                 for i in 0..HV_DIM_U64 {
                     bits[i] = rng.random();
                 }
                 Self { bits }
             },
-            Term::Var(_, id) => {
-                 let mut rng = StdRng::seed_from_u64(*id);
+            Term::Var(_, s) => {
+                 let id = deterministic_hash(s);
+                 let mut rng = StdRng::seed_from_u64(id);
                  let mut bits = [0; HV_DIM_U64];
                  for i in 0..HV_DIM_U64 {
                      bits[i] = rng.random();

@@ -1,93 +1,116 @@
 import json
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
-import sys
-import os
+from sklearn.decomposition import PCA
+
+def load_memory(filename):
+    with open(filename, 'r') as f:
+        data = json.load(f)
+    return data
+
+def decode_vectors(data):
+    vectors = []
+    terms = []
+    usages = []
+    
+    print("Decoding vectors...")
+    for i, item in enumerate(data):
+        if i % 1000 == 0:
+            print(f"\rDecoded {i}/{len(data)}...", end="")
+            
+        terms.append(item['term'])
+        usages.append(item['usage'])
+        
+        raw_u64 = item['vector']
+        arr_u64 = np.array(raw_u64, dtype=np.uint64)
+        arr_u8 = arr_u64.view(np.uint8)
+        bits = np.unpackbits(arr_u8)
+        
+        vectors.append(bits)
+    
+    print("\nDone decoding.")
+    return np.array(vectors), terms, usages
 
 def visualize(filename):
-    if not os.path.exists(filename):
-        print(f"File {filename} not found.")
-        return
-
-    try:
-        with open(filename, 'r') as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"Error reading file: {e}")
-        return
-
+    print(f"Loading {filename}...")
+    data = load_memory(filename)
+    
     if not data:
-        print("No concepts to visualize.")
+        print("No data found.")
         return
 
-    vectors = []
-    labels = []
+    print(f"Found {len(data)} concepts.")
     
-    print(f"Loading {len(data)} concepts...")
-
-    for concept in data:
-        # Extract term string representation
-        # The term structure in JSON might be complex: {"Atom": ...} or {"Compound": ...}
-        term_data = concept['term']
-        if isinstance(term_data, dict):
-            if 'Atom' in term_data:
-                label = f"Atom({term_data['Atom']})"
-            elif 'Compound' in term_data:
-                label = "Compound(...)" # Simplify for now
-            else:
-                label = str(term_data)
-        else:
-            label = str(term_data)
-            
-        labels.append(label)
-        
-        # Extract vector bits
-        # The Rust Hypervector struct has 'bits': [u64; 157]
-        u64_bits = concept['vector']['bits']
-        
-        # Convert u64 array to bit array
-        bit_array = []
-        for u64_val in u64_bits:
-            for i in range(64):
-                if (u64_val >> i) & 1:
-                    bit_array.append(1)
-                else:
-                    bit_array.append(0)
-        
-        vectors.append(bit_array)
-
-    X = np.array(vectors)
+    X, terms, usages = decode_vectors(data)
     
-    # t-SNE requires at least 2 samples
-    if len(X) < 2:
-        print("Not enough data points for t-SNE (need at least 2).")
-        return
+    print(f"Original Vector shape: {X.shape}")
+    
+    # 1. PCA Reduction (Critical for speed with high-dim data)
+    # Reduce from ~10,000 dims to 50 dims
+    n_pca = min(50, X.shape[0])
+    print(f"Running PCA to reduce dimensions to {n_pca}...")
+    pca = PCA(n_components=n_pca)
+    X_pca = pca.fit_transform(X.astype(np.float32))
+    print(f"PCA shape: {X_pca.shape}")
 
-    print("Reducing dimensions with t-SNE...")
-    # Perplexity must be less than number of samples
-    perplexity = min(30, len(X) - 1)
-    tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity, init='random', learning_rate='auto')
-    X_embedded = tsne.fit_transform(X)
-
+    # 2. t-SNE
+    print("Running t-SNE...")
+    perplexity = min(30, len(data) - 1) if len(data) > 1 else 1
+    tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity, init='pca', learning_rate='auto', verbose=1)
+    X_embedded = tsne.fit_transform(X_pca)
+    
     print("Plotting...")
-    plt.figure(figsize=(12, 8))
-    plt.scatter(X_embedded[:, 0], X_embedded[:, 1], alpha=0.6)
-
-    for i, label in enumerate(labels):
-        plt.annotate(label, (X_embedded[i, 0], X_embedded[i, 1]), fontsize=8, alpha=0.8)
-
-    plt.title("Concept Memory Visualization (t-SNE)")
+    plt.figure(figsize=(16, 12))
+    
+    # Normalize usages for color mapping
+    usages = np.array(usages)
+    if len(usages) > 0 and usages.max() > usages.min():
+        norm_usages = (usages - usages.min()) / (usages.max() - usages.min())
+    else:
+        norm_usages = np.zeros_like(usages, dtype=float)
+        
+    # Plot all points with low alpha
+    scatter = plt.scatter(X_embedded[:, 0], X_embedded[:, 1], c=norm_usages, cmap='coolwarm', s=20, alpha=0.4)
+    plt.colorbar(scatter, label='Usage / Activity')
+    
+    # Annotate only interesting terms (high usage or specific keywords)
+    # For the demo, we want to see the animals and vehicles
+    target_keywords = ["cat", "dog", "wolf", "animal", "car", "truck", "bicycle", "vehicle"]
+    
+    annotated_count = 0
+    for i, term in enumerate(terms):
+        # Clean up term string to check for keywords
+        # Term format might be 'Atom("cat")' or just 'cat' depending on export
+        term_lower = term.lower()
+        
+        is_target = any(k in term_lower for k in target_keywords)
+        is_high_usage = norm_usages[i] > 0.8
+        
+        if is_target or is_high_usage:
+            plt.annotate(term, (X_embedded[i, 0], X_embedded[i, 1]), 
+                         xytext=(5, 5), textcoords='offset points',
+                         fontsize=12 if is_target else 8,
+                         fontweight='bold' if is_target else 'normal',
+                         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", alpha=0.8))
+            annotated_count += 1
+            
+    print(f"Annotated {annotated_count} concepts.")
+        
+    plt.title(f"Memory Visualization (PCA + t-SNE) - {len(data)} Concepts")
     plt.xlabel("Dimension 1")
     plt.ylabel("Dimension 2")
     plt.grid(True, alpha=0.3)
+    plt.tight_layout()
     
     output_file = filename.replace('.json', '.png')
     plt.savefig(output_file)
-    print(f"Visualization saved to {output_file}")
+    print(f"Plot saved to {output_file}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python visualize.py <concepts.json>")
-    else:
-        visualize(sys.argv[1])
+        print("Usage: python visualize.py <memory.json>")
+        sys.exit(1)
+        
+    visualize(sys.argv[1])

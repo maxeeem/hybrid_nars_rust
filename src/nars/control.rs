@@ -122,6 +122,9 @@ impl NarsSystem {
         // Find similar concepts in memory to form associations
         let mut partners = Vec::new();
         
+        // Limit the number of partners to avoid performance explosion
+        let max_partners = 20;
+        
         for (term_b, concept_b) in &self.memory {
             if *term_b == term_a {
                 continue;
@@ -129,6 +132,9 @@ impl NarsSystem {
             let sim = concept_a.vector.similarity(&concept_b.vector);
             if sim > self.similarity_threshold {
                 partners.push(term_b.clone());
+                if partners.len() >= max_partners {
+                    break;
+                }
             }
         }
         
