@@ -31,6 +31,8 @@ pub enum Operator {
     ExtIntersection,  // |
     IntIntersection,  // &
     Difference,       // -
+    DifferenceInt,    // ~
+    Union,            // +
     ExtSet,           // {}
     IntSet,           // []
     Negation,         // --

@@ -92,59 +92,68 @@ impl NarsSystem {
 
     pub fn cycle(&mut self) {
         // Step 1: Selection
-        if let Some(task) = self.buffer.pop() {
-            let term_a = task.concept_term;
-            
-            // println!("Cycle: Processing task {:?}", term_a);
-            // println!("Memory size: {}", self.memory.len());
+        let task = match self.buffer.pop() {
+            Some(t) => t,
+            None => return,
+        };
+        
+        let term_a = task.concept_term.clone();
+        
+        // Debug print
+        // println!("Selected term: {}", term_a);
+        // println!("Term structure: {:?}", term_a);
 
-            // We need to clone concept_a to avoid borrowing issues with self.memory
-            let concept_a = if let Some(c) = self.memory.get(&term_a) {
-                c.clone()
-            } else {
-                return;
-            };
+        // 2. Association (Concept lookup/creation)
+        let concept_a = self.memory.entry(term_a.clone()).or_insert_with(|| {
+            let vector = Hypervector::from_term(&term_a);
+            // This fallback should rarely happen if tasks are managed correctly
+            Concept::new(term_a.clone(), vector, TruthValue::new(0.5, 0.0), Stamp::new(0, vec![]))
+        }).clone();
+        
+        // Reconstruct sentence for debug/logic
+        let sentence = Sentence::new(term_a.clone(), Punctuation::Judgement, concept_a.truth, concept_a.stamp.clone());
+        // println!("Selected sentence: {:?}", sentence);
+        // println!("Term structure: {:?}", sentence.term);
 
-            // Step 2: Association (HDC)
-            // Before finding a match, try immediate inference on the selected task
-            self.reason_single(&concept_a);
+        // Step 3: Reasoning
+        // Immediate reasoning with the selected concept
+        self.reason_single(&concept_a);
 
-            // Iterate through all concepts in memory to find matches
-            let mut partners = Vec::new();
-            
-            for (term_b, concept_b) in &self.memory {
-                if *term_b == term_a {
-                    continue;
-                }
-                let sim = concept_a.vector.similarity(&concept_b.vector);
-                if sim > self.similarity_threshold {
-                    partners.push(term_b.clone());
-                }
+        // Find similar concepts in memory to form associations
+        let mut partners = Vec::new();
+        
+        for (term_b, concept_b) in &self.memory {
+            if *term_b == term_a {
+                continue;
             }
-            
-            // println!("Partners found: {}", partners.len());
+            let sim = concept_a.vector.similarity(&concept_b.vector);
+            if sim > self.similarity_threshold {
+                partners.push(term_b.clone());
+            }
+        }
+        
+        // println!("Partners found: {}", partners.len());
 
-            for term_b in partners {
-                if let Some(concept_b) = self.memory.get(&term_b) {
-                    let concept_b = concept_b.clone();
-                    
-                    // println!("Calling reason for A and B");
-                    // Step 3: Reasoning
-                    self.reason(&concept_a, &concept_b);
-                    self.reason(&concept_b, &concept_a);
+        for term_b in partners {
+            if let Some(concept_b) = self.memory.get(&term_b) {
+                let concept_b = concept_b.clone();
+                
+                // println!("Calling reason for A and B");
+                // Step 3: Reasoning
+                self.reason(&concept_a, &concept_b);
+                self.reason(&concept_b, &concept_a);
 
-                    // Step 5: Learning (Hebbian)
-                    // Update vectors in memory
-                    // Note: We need to re-borrow mutably, so we can't hold concept_b ref
-                    // But we cloned concept_b, so it's fine.
-                    // However, we need to get mutable ref to concept_a and concept_b in memory.
-                    
-                    if let Some(c_a) = self.memory.get_mut(&term_a) {
-                        c_a.vector.update(&concept_b.vector, self.learning_rate);
-                    }
-                    if let Some(c_b) = self.memory.get_mut(&term_b) {
-                        c_b.vector.update(&concept_a.vector, self.learning_rate);
-                    }
+                // Step 5: Learning (Hebbian)
+                // Update vectors in memory
+                // Note: We need to re-borrow mutably, so we can't hold concept_b ref
+                // But we cloned concept_b, so it's fine.
+                // However, we need to get mutable ref to concept_a and concept_b in memory.
+                
+                if let Some(c_a) = self.memory.get_mut(&term_a) {
+                    c_a.vector.update(&concept_b.vector, self.learning_rate);
+                }
+                if let Some(c_b) = self.memory.get_mut(&term_b) {
+                    c_b.vector.update(&concept_a.vector, self.learning_rate);
                 }
             }
         }
@@ -183,7 +192,7 @@ impl NarsSystem {
                 // println!("  P1 matched! Bindings: {:?}", bindings_1);
                 // 2. Unify P2 with B, using bindings from 1
                 if let Some(final_bindings) = unify_with_bindings(&rule.premises[1], &concept_b.term, bindings_1) {
-                    // println!("  P2 matched!");
+                    // println!("  Rule {} ({}) matched! Executing inference.", rule_idx, rule.name);
                     // Success!
                     inferences_to_execute.push((rule_idx, final_bindings));
                 } else {
@@ -211,6 +220,7 @@ impl NarsSystem {
             if rule.premises.len() != 1 { continue; }
             
             if let Some(bindings) = unify_with_bindings(&rule.premises[0], &concept.term, HashMap::new()) {
+                // println!("  Single Rule {} ({}) matched! Executing inference.", rule_idx, rule.name); // Added debug print
                 inferences_to_execute.push((rule_idx, bindings));
             }
         }

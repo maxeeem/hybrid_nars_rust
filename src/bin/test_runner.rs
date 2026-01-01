@@ -120,6 +120,10 @@ fn run_test_file<P: AsRef<Path>>(path: P) -> Result<()> {
     }
     
     if !active_expectations.is_empty() {
+        println!("All outputs:");
+        for output in &accumulated_outputs {
+            println!("{:?} %{:.2};{:.2}%", output.term, output.truth.frequency, output.truth.confidence);
+        }
         return Err(anyhow::anyhow!("Unmet expectations: {:?}", active_expectations));
     }
 
@@ -136,11 +140,17 @@ fn check_expectations(outputs: &[Sentence], expectations: &mut Vec<String>) -> R
     for (i, expected_str) in expectations.iter().enumerate() {
         match parse_narsese(expected_str) {
             Ok(expected_sentence) => {
+                println!("Checking expectation: {:?}", expected_sentence.term);
                 for output in outputs {
                     if terms_match(&output.term, &expected_sentence.term) {
                         if truth_matches(output.truth, expected_sentence.truth) {
                             matched_indices.push(i);
                             break; 
+                        } else {
+                             println!("Log: Expected: {:.2};{:.2}, Found: {:.2};{:.2} (Stamp size: {})", 
+                                expected_sentence.truth.frequency, expected_sentence.truth.confidence,
+                                output.truth.frequency, output.truth.confidence,
+                                output.stamp.evidence.len());
                         }
                     }
                 }

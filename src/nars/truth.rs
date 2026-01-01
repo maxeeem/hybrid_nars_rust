@@ -87,6 +87,10 @@ pub fn deduction(v1: TruthValue, v2: TruthValue) -> TruthValue {
     )
 }
 
+pub fn structural_deduction(v: TruthValue) -> TruthValue {
+    deduction(v, TruthValue::new(1.0, 0.90))
+}
+
 pub fn contraposition(v: TruthValue) -> TruthValue {
     let f = v.frequency;
     let c = v.confidence;
@@ -300,11 +304,7 @@ pub fn negation(v: TruthValue) -> TruthValue {
     TruthValue::new(nal_not(v.frequency), v.confidence)
 }
 
-pub fn structural_deduction(v: TruthValue) -> TruthValue {
-    let f = v.frequency;
-    let c = v.confidence;
-    TruthValue::new(f, nal_and(&[f, c, c]))
-}
+
 
 pub fn desire_structural_strong(v: TruthValue) -> TruthValue {
     let f = v.frequency;
@@ -320,4 +320,11 @@ pub fn conversion(v: TruthValue) -> TruthValue {
         f,
         safe_div(nal_and(&[f, c]), nal_and(&[f, c]) + k)
     )
+}
+
+pub fn reduce_disjunction(v1: TruthValue, v2: TruthValue) -> TruthValue {
+    let v2_neg = negation(v2);
+    let v0 = intersection(v1, v2_neg);
+    let v_analytic = TruthValue::new(1.0, 1.0);
+    deduction(v0, v_analytic)
 }

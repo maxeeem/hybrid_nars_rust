@@ -101,6 +101,9 @@ fn parse_term_from_sexp(sexp: &Sexp) -> Option<Term> {
                 let op = match op_str.as_str() {
                     "&" => Operator::IntIntersection,
                     "|" => Operator::ExtIntersection,
+                    "+" => Operator::Union,
+                    "-" => Operator::Difference,
+                    "~" => Operator::DifferenceInt,
                     "--" => Operator::Negation,
                     _ => return None, // Unknown operator
                 };
@@ -135,6 +138,11 @@ fn get_truth_fn(name: &str) -> TruthFunction {
         "conversion" => TruthFunction::Single(truth::conversion),
         "contraposition" => TruthFunction::Single(truth::contraposition),
         "negation" => TruthFunction::Single(truth::negation),
+        "union" => TruthFunction::Double(truth::union),
+        "difference" => TruthFunction::Double(truth::difference),
+        "decomposition" => TruthFunction::Double(truth::decompose_ppp),
+        "reduce_disjunction" => TruthFunction::Double(truth::reduce_disjunction),
+        "structural_deduction" => TruthFunction::Single(truth::structural_deduction),
         _ => panic!("Unknown truth function: {}", name),
     }
 }
@@ -144,6 +152,7 @@ fn get_truth_fn(name: &str) -> TruthFunction {
 macro_rules! rule {
     ($p1:literal !- $conc:literal $truth:literal) => {
         InferenceRule {
+            name: $truth.to_string(),
             premises: vec![parse_term_str($p1)],
             conclusion: parse_term_str($conc),
             truth_fn: get_truth_fn($truth),
@@ -151,6 +160,7 @@ macro_rules! rule {
     };
     ($p1:literal $p2:literal !- $conc:literal $truth:literal) => {
         InferenceRule {
+            name: $truth.to_string(),
             premises: vec![parse_term_str($p1), parse_term_str($p2)],
             conclusion: parse_term_str($conc),
             truth_fn: get_truth_fn($truth),
@@ -192,6 +202,36 @@ pub fn get_all_rules() -> Vec<InferenceRule> {
     rules.push(rule!("(:S --> :M)" "(:P --> :M)"  !- "((:S --> $X) ==> (:P --> $X))" "induction"));
     rules.push(rule!("(:M --> :S)" "(:M --> :P)"  !- "(($X --> :S) ==> ($X --> :P))" "induction"));
     rules.push(rule!("(:M --> :S)" "(:M --> :P)"  !- "(($X --> :P) ==> ($X --> :S))" "abduction"));
+
+    // --- SETS & COMPOSITION (NAL-3) ---
+    // Intersection (&)
+    rules.push(rule!("(:P --> :M) (:S --> :M)" !- "((& :S :P) --> :M)" "intersection"));
+    rules.push(rule!("(:M --> :P) (:M --> :S)" !- "(:M --> (& :P :S))" "intersection"));
+    
+    // Union (+) - mapped to 'union' truth fn
+    rules.push(rule!("(:P --> :M) (:S --> :M)" !- "((+ :S :P) --> :M)" "union"));
+    rules.push(rule!("(:M --> :P) (:M --> :S)" !- "(:M --> (+ :P :S))" "union"));
+    
+    // Difference (-) and (~)
+    rules.push(rule!("(:P --> :M) (:S --> :M)" !- "((~ :P :S) --> :M)" "difference"));
+    rules.push(rule!("(:M --> :P) (:M --> :S)" !- "(:M --> (- :P :S))" "difference"));
+
+    // --- DECOMPOSITION (NAL-3) ---
+    // Simplification for Sets
+    rules.push(rule!("(:S --> :M) ((& :S :P) --> :M)" !- "(:P --> :M)" "decomposition"));
+    rules.push(rule!("(:M --> :S) (:M --> (& :S :P))" !- "(:M --> :P)" "decomposition"));
+
+    // Disjunction Decomposition
+    rules.push(rule!("(:S --> (| :P :M)) (:S --> :M)" !- "(:S --> :P)" "reduce_disjunction"));
+    rules.push(rule!("(:S --> (| :M :P)) (:S --> :M)" !- "(:S --> :P)" "reduce_disjunction"));
+
+    // Structural Decomposition (Single Premise)
+    rules.push(rule!("((| :S :P) --> :M)" !- "(:S --> :M)" "structural_deduction"));
+    rules.push(rule!("((| :P :S) --> :M)" !- "(:S --> :M)" "structural_deduction"));
+    rules.push(rule!("(:M --> (& :S :P))" !- "(:M --> :S)" "structural_deduction"));
+    rules.push(rule!("(:M --> (& :P :S))" !- "(:M --> :S)" "structural_deduction"));
+    rules.push(rule!("(:M --> (| :S :P))" !- "(:M --> :S)" "structural_deduction"));
+    rules.push(rule!("(:M --> (| :P :S))" !- "(:M --> :S)" "structural_deduction"));
 
     rules
 }

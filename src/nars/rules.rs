@@ -8,6 +8,7 @@ pub enum TruthFunction {
 }
 
 pub struct InferenceRule {
+    pub name: String,
     pub premises: Vec<Term>,
     pub conclusion: Term,
     pub truth_fn: TruthFunction,
@@ -30,6 +31,7 @@ pub fn load_default_rules() -> Vec<InferenceRule> {
     let ded_concl = Term::Compound(Operator::Inheritance, vec![var_s.clone(), var_p.clone()]);
 
     rules.push(InferenceRule {
+        name: "deduction".to_string(),
         premises: vec![ded_p1, ded_p2],
         conclusion: ded_concl,
         truth_fn: TruthFunction::Double(truth::deduction),
@@ -44,6 +46,7 @@ pub fn load_default_rules() -> Vec<InferenceRule> {
     let abd_concl = Term::Compound(Operator::Inheritance, vec![var_s.clone(), var_p.clone()]);
 
     rules.push(InferenceRule {
+        name: "abduction".to_string(),
         premises: vec![abd_p1, abd_p2],
         conclusion: abd_concl,
         truth_fn: TruthFunction::Double(truth::abduction),
@@ -58,6 +61,7 @@ pub fn load_default_rules() -> Vec<InferenceRule> {
     let ind_concl = Term::Compound(Operator::Inheritance, vec![var_s.clone(), var_p.clone()]);
 
     rules.push(InferenceRule {
+        name: "induction".to_string(),
         premises: vec![ind_p1, ind_p2],
         conclusion: ind_concl,
         truth_fn: TruthFunction::Double(truth::induction),
