@@ -2,6 +2,7 @@ use anyhow::Result;
 use hybrid_nars_rust::nars::control::NarsSystem;
 use hybrid_nars_rust::nars::parser::parse_narsese;
 use hybrid_nars_rust::nars::memory::{Concept, Hypervector};
+use hybrid_nars_rust::nars::term::Term;
 use std::io::{self, Write};
 
 fn main() -> Result<()> {
@@ -71,6 +72,71 @@ fn main() -> Result<()> {
                 println!("Failed to serialize memory: {}", e);
             } else {
                 println!("Memory exported to {}", filename);
+            }
+            continue;
+        } else if trimmed.starts_with(".drift ") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() != 3 {
+                println!("Usage: .drift <term1> <term2>");
+                continue;
+            }
+            let t1_str = parts[1];
+            let t2_str = parts[2];
+            let term1 = Term::Atom(t1_str.to_string());
+            let term2 = Term::Atom(t2_str.to_string());
+
+            // Helper to get vector
+            let get_vector = |sys: &NarsSystem, t: &Term| -> Hypervector {
+                if let Some(c) = sys.memory.get(t) {
+                    c.vector
+                } else {
+                    Hypervector::from_term(t)
+                }
+            };
+
+            let v1_initial = get_vector(&system, &term1);
+            let v2_initial = get_vector(&system, &term2);
+            let sim_initial = v1_initial.similarity(&v2_initial);
+
+            println!("Initial Similarity({}, {}): {:.4}", t1_str, t2_str, sim_initial);
+
+            let stmt = format!("<{} --> {}>.", t1_str, t2_str);
+            println!("Injecting: {}", stmt);
+            match parse_narsese(&stmt) {
+                Ok(sentence) => {
+                    system.input(sentence);
+                    
+                    // Activate the terms themselves to facilitate interaction
+                    if let Some(mut c1) = system.memory.get(&term1).cloned() {
+                        c1.priority = 0.99; // Boost priority
+                        system.add_concept(c1);
+                    }
+
+                    if let Some(mut c2) = system.memory.get(&term2).cloned() {
+                        c2.priority = 0.99; // Boost priority
+                        system.add_concept(c2);
+                    }
+
+                    println!("Running 20 cycles...");
+                    for _ in 0..20 {
+                        system.cycle();
+                    }
+                    
+                    let v1_final = get_vector(&system, &term1);
+                    let v2_final = get_vector(&system, &term2);
+                    let sim_final = v1_final.similarity(&v2_final);
+                    let delta = sim_final - sim_initial;
+
+                    println!("Final Similarity: {:.4}", sim_final);
+                    println!("Delta: {:.4}", delta);
+                    
+                    if delta > 0.0 {
+                        println!("SUCCESS: Concept Drift Detected.");
+                    } else {
+                        println!("FAIL: No Drift Detected.");
+                    }
+                },
+                Err(e) => println!("Error parsing injection: {:?}", e),
             }
             continue;
         }

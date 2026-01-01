@@ -2,7 +2,7 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
-use super::term::{Term, deterministic_hash};
+use super::term::{Term, Operator, deterministic_hash};
 use super::truth::TruthValue;
 use super::sentence::Stamp;
 use serde::{Serialize, Deserialize};
@@ -172,6 +172,26 @@ impl Hypervector {
         }
 
         *self = Self::bundle(&inputs);
+    }
+
+    pub fn compound(op: &Operator, args: &[Hypervector]) -> Self {
+        let mut inputs = Vec::new();
+        
+        // Operator vector
+        let op_str = format!("{:?}", op);
+        let id = deterministic_hash(&op_str);
+        let mut rng = StdRng::seed_from_u64(id);
+        let mut bits = [0; HV_DIM_U64];
+        for i in 0..HV_DIM_U64 {
+            bits[i] = rng.random();
+        }
+        inputs.push(Self { bits });
+
+        for arg in args {
+            inputs.push(*arg);
+        }
+        
+        Self::bundle(&inputs)
     }
 
     pub fn from_term(term: &Term) -> Self {

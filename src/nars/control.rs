@@ -59,8 +59,24 @@ impl NarsSystem {
         }
     }
 
+    pub fn resolve_vector(&self, term: &Term) -> Hypervector {
+        if let Some(concept) = self.memory.get(term) {
+            return concept.vector;
+        }
+
+        match term {
+            Term::Compound(op, args) => {
+                let arg_vectors: Vec<Hypervector> = args.iter()
+                    .map(|arg| self.resolve_vector(arg))
+                    .collect();
+                Hypervector::compound(op, &arg_vectors)
+            },
+            _ => Hypervector::from_term(term),
+        }
+    }
+
     pub fn input(&mut self, sentence: Sentence) {
-        let vector = Hypervector::from_term(&sentence.term);
+        let vector = self.resolve_vector(&sentence.term);
         let concept = Concept::new(sentence.term, vector, sentence.truth, sentence.stamp);
         self.add_concept(concept);
     }
